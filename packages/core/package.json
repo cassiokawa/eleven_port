@@ -8,9 +8,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "dexie": "^4.0.0"
+    "@mozilla/readability": "^0.6.0",
+    "dexie": "^4.0.0",
+    "pdfjs-dist": "^6.4.299",
+    "tesseract.js": "^7.0.0",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
-    "fake-indexeddb": "^6.0.0"
+    "@types/jsdom": "^30.0.0",
+    "@types/turndown": "^5.0.6",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^29.1.1",
+    "pdf-lib": "^1.17.1"
   }
 }

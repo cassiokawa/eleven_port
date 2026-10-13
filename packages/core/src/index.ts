@@ -5,3 +5,7 @@ export * from "./jobs";
 export * from "./retry";
 export * from "./markdown";
 export * from "./assemble";
+export * from "./extract/web";
+export * from "./extract/pdf";
+export * from "./extract/ocr";
+export * from "./tts";
