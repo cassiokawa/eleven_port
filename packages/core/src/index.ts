@@ -9,3 +9,4 @@ export * from "./extract/web";
 export * from "./extract/pdf";
 export * from "./extract/ocr";
 export * from "./tts";
+export * from "./organize";
