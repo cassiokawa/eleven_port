@@ -10,3 +10,4 @@ export * from "./extract/pdf";
 export * from "./extract/ocr";
 export * from "./tts";
 export * from "./organize";
+export * from "./library";
