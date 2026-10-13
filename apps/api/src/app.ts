@@ -1,9 +1,14 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { Hono } from "hono";
+import { parseInput, suggest, type MessagesClient } from "./suggest.ts";
 
 export interface Deps {
   apiKey?: string;
   fetch?: typeof fetch;
   resolveHost?: (host: string) => Promise<string[]>;
+  /** Override for tests; defaults to a client built from ANTHROPIC_API_KEY. */
+  anthropic?: MessagesClient;
+  model?: string;
 }
 
 const MAX_TTS_CHARS = 5000;
@@ -71,6 +76,22 @@ export function createApp(deps: Deps = {}) {
     const text = await res.text();
     if (text.length > MAX_FETCH_BYTES) return c.json({ error: "too large" }, 413);
     return c.json({ url: url.href, status: res.status, contentType: res.headers.get("content-type"), body: text });
+  });
+
+  // Optional LLM refinement of the local heuristic suggestions. The key stays server-side.
+  app.post("/suggest", async (c) => {
+    const input = parseInput(await c.req.json().catch(() => null));
+    if (!input) return c.json({ error: "title and excerpt required" }, 400);
+    const client = deps.anthropic ?? (process.env.ANTHROPIC_API_KEY ? new Anthropic() : undefined);
+    if (!client) return c.json({ error: "ANTHROPIC_API_KEY not configured" }, 501);
+    try {
+      return c.json(await suggest(client, input, deps.model ?? process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5"));
+    } catch (e) {
+      if (e instanceof Anthropic.RateLimitError) return c.json({ error: "rate limited" }, 429);
+      if (e instanceof Anthropic.APIConnectionError) return c.json({ error: "upstream unreachable" }, 502);
+      if (e instanceof Anthropic.APIError) return c.json({ error: "upstream error", status: e.status }, 502);
+      return c.json({ error: (e as Error).message }, 502);
+    }
   });
 
   return app;

@@ -45,3 +45,46 @@ describe("fetch proxy", () => {
     expect(j.body).toBe("<p>hi</p>");
   });
 });
+
+import { sanitize, parseInput } from "../src/suggest.ts";
+
+describe("suggest", () => {
+  const input = parseInput({ title: "Quantum", excerpt: "text", vocabulary: ["Physics", "cooking"], collections: [] })!;
+
+  it("rejects bad input and reports a missing key", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const app = createApp();
+    const bad = await app.request("/suggest", { method: "POST", body: JSON.stringify({}), headers: { "content-type": "application/json" } });
+    expect(bad.status).toBe(400);
+    const nokey = await app.request("/suggest", { method: "POST", body: JSON.stringify({ title: "t", excerpt: "e" }), headers: { "content-type": "application/json" } });
+    expect(nokey.status).toBe(501);
+  });
+
+  it("calls the model with schema output and fallbacks, and sanitizes the result", async () => {
+    const create = vi.fn(async (_args: Record<string, unknown>) => ({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ tags: ["physics", "quantum", "Quantum", "x".repeat(80)], collection: " Science/Physics ", summary: "About quanta." }) }],
+    }));
+    const app = createApp({ anthropic: { beta: { messages: { create } } } as never, model: "claude-opus-5-5" });
+    const res = await app.request("/suggest", { method: "POST", body: JSON.stringify({ title: "Quantum", excerpt: "e", vocabulary: ["Physics"] }), headers: { "content-type": "application/json" } });
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.tags.slice(0, 2)).toEqual(["Physics", "quantum"]);
+    expect(j.tags).toHaveLength(3);
+    expect(j.collection).toBe("Science/Physics");
+    const args = create.mock.calls[0]![0];
+    expect(args.fallbacks).toBe("default");
+    expect(args.model).toBe("claude-opus-5-5");
+  });
+
+  it("surfaces refusals as an upstream failure", async () => {
+    const create = async () => ({ stop_reason: "refusal", content: [] });
+    const app = createApp({ anthropic: { beta: { messages: { create } } } as never });
+    const res = await app.request("/suggest", { method: "POST", body: JSON.stringify({ title: "t", excerpt: "e" }), headers: { "content-type": "application/json" } });
+    expect(res.status).toBe(502);
+  });
+
+  it("sanitize tolerates garbage", () => {
+    expect(sanitize(null, input)).toEqual({ tags: [], collection: undefined, summary: "" });
+  });
+});

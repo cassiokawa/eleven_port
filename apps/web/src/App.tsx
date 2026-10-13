@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  buildToc, collectionTree, deleteCollection, exportArchive, getParts, importArchive, itemToMarkdown, listItems,
-  moveItem, parseMarkdown, renameCollection, savePosition, searchIndex, suggestCollection, suggestTags, tocToMarkdown,
-  blocksToMarkdown, narrate, updatePart, type Player, type CollectionNode, type Item, type Part,
+  collectionTree, deleteCollection, exportArchive, getParts, importArchive, itemToMarkdown, listItems,
+  moveItem, parseMarkdown, renameCollection, savePosition, searchIndex,
+  blocksToMarkdown, localSuggestions, narrate, refineSuggestions, type Suggestions, updatePart, type Player, type CollectionNode, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
 import { ingestMarkdown, ingestPdf, ingestUrl, resumePending, retryFailed } from "./ingest";
@@ -116,7 +116,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   const [pos, setPos] = useState<{ i: number; n: number } | null>(null);
   const [err, setErr] = useState("");
   const [prog, setProg] = useState("");
-  const [sugg, setSugg] = useState<{ tags: ReturnType<typeof suggestTags>; collection?: string; toc: string }>();
+  const [sugg, setSugg] = useState<Suggestions>();
   const player = useRef<Player | undefined>(undefined);
 
   const load = useCallback(async () => {
@@ -143,11 +143,17 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   };
 
   const suggest = async () => {
-    const md = await itemToMarkdown(db, id);
     const all = await db.items.toArray();
-    const vocab = [...new Set(all.flatMap((i) => i.tags))];
-    const toc = tocToMarkdown(buildToc(parts.flatMap((p) => p.blocks)));
-    setSugg({ tags: suggestTags(md, vocab), collection: suggestCollection(md, all.map((i) => i.collection).filter((c): c is string => !!c)), toc });
+    const ctx = {
+      title: item?.title ?? "",
+      blocks: parts.flatMap((p) => p.blocks),
+      vocabulary: [...new Set(all.flatMap((i) => i.tags))],
+      collections: [...new Set(all.map((i) => i.collection).filter((c): c is string => !!c))],
+    };
+    const local = localSuggestions(ctx);
+    setSugg(local);
+    // Claude refinement is optional: if the API has no key or is unreachable, the local result stays.
+    refineSuggestions("/api", ctx, local).then(setSugg).catch(() => {});
   };
 
   const applyTag = async (t: string) => {
@@ -200,7 +206,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
       {sugg && (
         <section style={{ background: "#f4f4f4", padding: ".75rem", borderRadius: 6 }}>
           <strong>Suggested tags</strong>{" "}
-          {sugg.tags.map((t) => <button key={t.tag} onClick={() => void applyTag(t.tag)}>{t.existing ? "" : "+ "}{t.tag}</button>)}
+          {sugg.tags.map((t) => <button key={t.tag} onClick={() => void applyTag(t.tag)}>{t.existing ? "" : "+ "}{t.tag}</button>)}{sugg.refined && <small> refined by Claude{sugg.summary ? `: ${sugg.summary}` : ""}</small>}
           {sugg.collection && <p>Suggested collection: <button onClick={async () => { await db.items.update(id, { collection: sugg.collection }); await load(); }}>{sugg.collection}</button></p>}
           {sugg.toc && <details open><summary>Proposed index</summary><pre>{sugg.toc}</pre></details>}
         </section>
