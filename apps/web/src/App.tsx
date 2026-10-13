@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  buildToc, exportArchive, getParts, importArchive, itemToMarkdown, listItems, refreshStatus, savePart,
-  searchIndex, suggestCollection, suggestTags, tocToMarkdown, blocksToMarkdown, type Item, type Part,
+  buildToc, collectionTree, deleteCollection, exportArchive, getParts, importArchive, itemToMarkdown, listItems,
+  moveItem, parseMarkdown, renameCollection, savePosition, searchIndex, suggestCollection, suggestTags, tocToMarkdown,
+  blocksToMarkdown, updatePart, type CollectionNode, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
-import { ingestMarkdown, ingestPdf, ingestUrl, retryFailed } from "./ingest";
+import { ingestMarkdown, ingestPdf, ingestUrl, resumePending, retryFailed } from "./ingest";
 import { narrate, type Player } from "./player";
 
 const VOICE = "21m00Tcm4TlvDq8ikWAM";
@@ -20,19 +21,23 @@ export function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
+  const [folder, setFolder] = useState("");
+  const [tree, setTree] = useState<CollectionNode[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
-    let list = await listItems(db, { tag: tag || undefined });
+    setTree(await collectionTree(db));
+    let list = await listItems(db, { tag: tag || undefined, collection: folder || undefined });
     if (query.trim()) {
       const ids = new Set((await searchIndex(db)).search(query, { prefix: true }).map((h) => h.itemId as string));
       list = list.filter((i) => ids.has(i.id));
     }
     setItems(list);
-  }, [query, tag]);
+  }, [query, tag, folder]);
   useEffect(() => void refresh(), [refresh]);
+  useEffect(() => { void resumePending().then(refresh).catch(() => {}); }, [refresh]);
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(label);
@@ -72,6 +77,7 @@ export function App() {
         <input placeholder="Filter by tag" value={tag} onChange={(e) => setTag(e.target.value)} />{" "}
         <button onClick={() => void run("Exporting", async () => download("library.zip", await exportArchive(db) as BlobPart, "application/zip"))}>Export library</button>
       </p>
+      <Folders tree={tree} current={folder} onPick={setFolder} onChanged={refresh} />
       <ul style={{ listStyle: "none", padding: 0 }}>
         {items.map((i) => (
           <li key={i.id} style={{ padding: ".5rem 0", borderBottom: "1px solid #ddd" }}>
@@ -82,6 +88,25 @@ export function App() {
         {!items.length && <li>No items yet.</li>}
       </ul>
     </main>
+  );
+}
+
+function Folders({ tree, current, onPick, onChanged }: { tree: CollectionNode[]; current: string; onPick: (p: string) => void; onChanged: () => void }) {
+  const render = (nodes: CollectionNode[], depth = 0): React.ReactNode =>
+    nodes.map((n) => (
+      <div key={n.path} style={{ paddingLeft: depth * 16 }}>
+        <button onClick={() => onPick(n.path)} style={{ fontWeight: current === n.path ? 700 : 400 }}>{n.name} ({n.count})</button>{" "}
+        <button title="Rename" onClick={async () => { const v = prompt("New name", n.name); if (v) { if (current === n.path) onPick(""); await renameCollection(db, n.path, v); onChanged(); } }}>✎</button>{" "}
+        <button title="Delete folder (items are kept)" onClick={async () => { if (confirm(`Delete folder ${n.path}? Items are kept.`)) { if (current.startsWith(n.path)) onPick(""); await deleteCollection(db, n.path); onChanged(); } }}>✕</button>
+        {render(n.children, depth + 1)}
+      </div>
+    ));
+  if (!tree.length) return null;
+  return (
+    <nav aria-label="Collections">
+      <button onClick={() => onPick("")} style={{ fontWeight: current === "" ? 700 : 400 }}>All</button>
+      {render(tree)}
+    </nav>
   );
 }
 
@@ -100,10 +125,21 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   }, [id]);
   useEffect(() => { void load(); return () => player.current?.stop(); }, [load]);
 
-  const play = (text: string) => {
+  // part = -1 narrates the whole item; resume continues from the saved chunk.
+  const play = (text: string, part = -1, resume = false) => {
     player.current?.stop();
     setErr("");
-    player.current = narrate(text, VOICE, { onChunk: (i, n) => setPos({ i, n }), onDone: () => setPos(null), onError: (e) => setErr(e.message) });
+    const start = resume && item?.position?.part === part ? item.position.chunk : 0;
+    player.current = narrate(
+      text,
+      VOICE,
+      {
+        onChunk: (i, n) => { setPos({ i, n }); void savePosition(db, id, part, i); },
+        onDone: () => { setPos(null); void savePosition(db, id, part, 0); },
+        onError: (e) => setErr(e.message),
+      },
+      start,
+    );
   };
 
   const suggest = async () => {
@@ -124,8 +160,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
     // Re-processing a failed part needs the original source; for now allow manual replacement.
     const text = prompt(`Paste text for ${p.title || `part ${p.index + 1}`}`);
     if (!text) return;
-    await savePart(db, id, p.index, p.title, [{ type: "paragraph", text }]);
-    await refreshStatus(db, id, parts.length);
+    await updatePart(db, id, p.index, parseMarkdown(text));
     await load();
   };
 
@@ -137,8 +172,12 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
       <p><small>{item.kind} · {item.status} · {item.source}</small></p>
       <p>
         <button onClick={async () => play(await itemToMarkdown(db, id))}>▶ Narrate all</button>{" "}
+        {item.position && item.position.chunk > 0 && item.position.part === -1 && (
+          <button onClick={async () => play(await itemToMarkdown(db, id), -1, true)}>⏵ Resume (chunk {item.position.chunk + 1})</button>
+        )}{" "}
         <button onClick={() => { player.current?.stop(); setPos(null); }}>■ Stop</button>{" "}
         <button onClick={async () => download(`${item.title}.md`, await itemToMarkdown(db, id), "text/markdown")}>Export .md</button>{" "}
+        <label>Folder: <input defaultValue={item.collection ?? ""} placeholder="Science/Physics" onBlur={async (e) => { await moveItem(db, id, e.target.value); await load(); }} /></label>{" "}
         <button onClick={() => void suggest()}>Suggest tags / index</button>{" "}
         {parts.some((p) => p.status !== "ok") && (
           <button
@@ -170,7 +209,11 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
         <article key={p.id} style={{ borderTop: "1px solid #ddd", marginTop: "1rem" }}>
           <h3>{p.title || `Part ${p.index + 1}`} {p.status !== "ok" && <em style={{ color: "crimson" }}>({p.status})</em>}</h3>
           {p.status === "ok" ? <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{blocksToMarkdown(p.blocks)}</pre> : <button onClick={() => void retryPart(p)}>Replace manually</button>}
-          {p.status === "ok" && <button onClick={() => play(blocksToMarkdown(p.blocks))}>▶ Narrate this part</button>}
+          {p.status === "ok" && <button onClick={() => play(blocksToMarkdown(p.blocks), p.index)}>▶ Narrate this part</button>}
+          {" "}<button onClick={async () => {
+            const v = prompt("Edit Markdown for this part", blocksToMarkdown(p.blocks));
+            if (v !== null) { await updatePart(db, id, p.index, parseMarkdown(v)); await load(); }
+          }}>Edit</button>
         </article>
       ))}
     </main>

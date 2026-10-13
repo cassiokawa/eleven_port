@@ -1,16 +1,22 @@
-import { chunkText, toTtsRequest, withRetry, type Chunk } from "@eleven-port/core";
+import { audioKey, chunkText, getAudio, putAudio, toTtsRequest, withRetry, type Chunk } from "@eleven-port/core";
+import { db } from "./db";
 
 const cache = new Map<string, Promise<string>>();
 
 function fetchAudio(c: Chunk, voiceId: string): Promise<string> {
-  const key = `${voiceId}:${c.hash}`;
+  const key = audioKey(voiceId, c.hash);
   let p = cache.get(key);
   if (!p) {
     p = withRetry(async () => {
+      // Persistent cache first: replays and post-crash resumes cost no API characters.
+      const cached = await getAudio(db, key).catch(() => undefined);
+      if (cached) return URL.createObjectURL(cached);
       const r = await fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toTtsRequest(c, voiceId)) });
       if (r.status === 429 || r.status >= 500) throw new Error(`tts ${r.status}`);
       if (!r.ok) throw Object.assign(new Error(`tts ${r.status}`), { fatal: true });
-      return URL.createObjectURL(await r.blob());
+      const blob = await r.blob();
+      await putAudio(db, key, blob).catch(() => {});
+      return URL.createObjectURL(blob);
     }, { retries: 6 });
     // A failed fetch must not poison the cache; the next play retries.
     p.catch(() => cache.delete(key));

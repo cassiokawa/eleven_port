@@ -1,6 +1,6 @@
 import {
   addItem, assemblePages, buildToc, createJob, extractPdf, extractWeb, normalizeHeadings, parseMarkdown,
-  createOcr, ocrToBlocks, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
+  createOcr, ocrToBlocks, resumeInterrupted, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
   type Block, type Item,
 } from "@eleven-port/core";
 import { db } from "./db";
@@ -113,3 +113,19 @@ export async function retryFailed(item: Item, onProgress?: (d: number, t: number
 }
 
 export { assemblePages, buildToc };
+
+/** Continue PDF jobs left mid-flight by a closed tab or crash. Call once at startup. */
+export function resumePending() {
+  return resumeInterrupted(db, async (item) => {
+    if (item.kind !== "pdf") return undefined;
+    const blob = await db.blobs.get(item.id);
+    if (!blob) return undefined;
+    const pages = await extractPdf(blob.data);
+    return async (unit) => {
+      const page = pages[unit.index]!;
+      if (page.needsOcr) throw new Error("no text layer (scanned page)");
+      await savePart(db, item.id, unit.index, `Page ${page.page}`, page.blocks);
+      return "ok";
+    };
+  });
+}

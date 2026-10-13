@@ -12,3 +12,6 @@ export * from "./tts";
 export * from "./organize";
 export * from "./library";
 export * from "./reprocess";
+export * from "./collections";
+export * from "./audio-cache";
+export * from "./resume";

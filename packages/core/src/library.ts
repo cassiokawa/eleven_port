@@ -141,3 +141,17 @@ export async function importArchive(db: LibraryDB, zip: Uint8Array): Promise<{ i
   });
   return { items: m.items.length, parts: parts.length };
 }
+
+/** Edit a part's content by hand; marks it ok so a manual fix clears a failed gap. */
+export async function updatePart(db: LibraryDB, itemId: string, index: number, blocks: Block[], title?: string): Promise<Part> {
+  const existing = await db.parts.get(`${itemId}:${index}`);
+  if (!existing) throw new Error(`part ${index} not found`);
+  const part = await savePart(db, itemId, index, title ?? existing.title, blocks, "ok");
+  const all = await getParts(db, itemId);
+  await refreshStatus(db, itemId, all.length);
+  return part;
+}
+
+export async function savePosition(db: LibraryDB, itemId: string, part: number, chunk: number): Promise<void> {
+  await db.items.update(itemId, { position: { part, chunk } });
+}
