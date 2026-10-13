@@ -22,7 +22,7 @@ export interface SuggestOutput {
 const MAX_EXCERPT = 6000;
 const MAX_LIST = 200;
 
-const SCHEMA = {
+export const SCHEMA = {
   type: "object",
   properties: {
     tags: { type: "array", items: { type: "string" } },
