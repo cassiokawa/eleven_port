@@ -17,7 +17,7 @@ const server = createServer((req, res) => {
 const base = `http://localhost:${server.address().port}`;
 
 const ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), "ep-")), {
-  executablePath: process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium",
+  executablePath: process.env.CHROMIUM_PATH,
   headless: false,
   args: ["--headless=new", `--disable-extensions-except=${dist}`, `--load-extension=${dist}`, "--no-sandbox"],
   viewport: { width: 1100, height: 800 },

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Hono } from "hono";
+import { guard, type GuardOptions } from "./guard.ts";
 import { parseInput, suggest, type MessagesClient } from "./suggest.ts";
 
 export interface Deps {
@@ -9,6 +10,7 @@ export interface Deps {
   /** Override for tests; defaults to a client built from ANTHROPIC_API_KEY. */
   anthropic?: MessagesClient;
   model?: string;
+  guard?: GuardOptions;
 }
 
 const MAX_TTS_CHARS = 5000;
@@ -27,6 +29,14 @@ async function defaultResolve(host: string): Promise<string[]> {
 
 export function createApp(deps: Deps = {}) {
   const app = new Hono();
+  app.use(
+    "*",
+    guard({
+      token: process.env.API_TOKEN,
+      allowedOrigins: process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean),
+      ...deps.guard,
+    }),
+  );
   const doFetch = deps.fetch ?? fetch;
   const resolve = deps.resolveHost ?? defaultResolve;
 
@@ -43,6 +53,11 @@ export function createApp(deps: Deps = {}) {
     if (!/^[A-Za-z0-9]{10,40}$/.test(body.voice_id)) return c.json({ error: "invalid voice_id" }, 400);
     if (body.text.length === 0 || body.text.length > MAX_TTS_CHARS) {
       return c.json({ error: `text must be 1-${MAX_TTS_CHARS} chars` }, 400);
+    }
+    const vs = body.voice_settings;
+    if (vs !== undefined) {
+      const ok = vs && typeof vs === "object" && Object.values(vs).every((v) => typeof v === "number" && v >= 0 && v <= 1);
+      if (!ok) return c.json({ error: "voice_settings values must be numbers in [0,1]" }, 400);
     }
     const { voice_id, ...rest } = body;
     const res = await doFetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice_id}`, {

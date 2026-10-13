@@ -5,10 +5,10 @@ import {
   blocksToMarkdown, localSuggestions, narrate, refineSuggestions, type Suggestions, updatePart, type Player, type CollectionNode, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
+import { loadSettings, saveSettings, type Settings } from "./settings";
 import { ingestMarkdown, ingestPdf, ingestUrl, resumePending, retryFailed } from "./ingest";
 
 
-const VOICE = "21m00Tcm4TlvDq8ikWAM";
 
 function download(name: string, data: BlobPart, type: string) {
   const a = document.createElement("a");
@@ -77,6 +77,7 @@ export function App() {
         <input placeholder="Filter by tag" value={tag} onChange={(e) => setTag(e.target.value)} />{" "}
         <button onClick={() => void run("Exporting", async () => download("library.zip", await exportArchive(db) as BlobPart, "application/zip"))}>Export library</button>
       </p>
+      <SettingsPanel />
       <Folders tree={tree} current={folder} onPick={setFolder} onChanged={refresh} />
       <ul style={{ listStyle: "none", padding: 0 }}>
         {items.map((i) => (
@@ -88,6 +89,24 @@ export function App() {
         {!items.length && <li>No items yet.</li>}
       </ul>
     </main>
+  );
+}
+
+function SettingsPanel() {
+  const [s, setS] = useState<Settings>(loadSettings);
+  const set = (patch: Partial<Settings>) => { const n = { ...s, ...patch }; setS(n); saveSettings(n); };
+  return (
+    <details>
+      <summary>Voice and API settings</summary>
+      <p>
+        <label>Voice ID <input value={s.voiceId} onChange={(e) => set({ voiceId: e.target.value })} /></label>{" "}
+        <label>API token <input type="password" value={s.token} onChange={(e) => set({ token: e.target.value })} /></label>
+      </p>
+      <p>
+        <label>Stability {s.stability} <input type="range" min={0} max={1} step={0.05} value={s.stability} onChange={(e) => set({ stability: Number(e.target.value) })} /></label>{" "}
+        <label>Similarity {s.similarity} <input type="range" min={0} max={1} step={0.05} value={s.similarity} onChange={(e) => set({ similarity: Number(e.target.value) })} /></label>
+      </p>
+    </details>
   );
 }
 
@@ -128,11 +147,12 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   // part = -1 narrates the whole item; resume continues from the saved chunk.
   const play = (text: string, part = -1, resume = false) => {
     player.current?.stop();
+    const cfg = loadSettings();
     setErr("");
     const start = resume && item?.position?.part === part ? item.position.chunk : 0;
     player.current = narrate(
       text,
-      { db, apiBase: "/api", voiceId: VOICE },
+      { db, apiBase: "/api", voiceId: cfg.voiceId, token: cfg.token || undefined, voiceSettings: { stability: cfg.stability, similarity_boost: cfg.similarity } },
       {
         onChunk: (i, n) => { setPos({ i, n }); void savePosition(db, id, part, i); },
         onDone: () => { setPos(null); void savePosition(db, id, part, 0); },
@@ -153,7 +173,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
     const local = localSuggestions(ctx);
     setSugg(local);
     // Claude refinement is optional: if the API has no key or is unreachable, the local result stays.
-    refineSuggestions("/api", ctx, local).then(setSugg).catch(() => {});
+    refineSuggestions("/api", ctx, local, fetch, loadSettings().token || undefined).then(setSugg).catch(() => {});
   };
 
   const applyTag = async (t: string) => {

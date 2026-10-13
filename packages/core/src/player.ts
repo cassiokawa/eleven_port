@@ -1,5 +1,6 @@
 import { audioKey, getAudio, putAudio } from "./audio-cache";
-import { chunkText, toTtsRequest, type Chunk } from "./tts";
+import { hashText } from "./hash";
+import { chunkText, toTtsRequest, type Chunk, type VoiceSettings } from "./tts";
 import { withRetry } from "./retry";
 import type { LibraryDB } from "./store";
 
@@ -10,10 +11,14 @@ export interface PlayerConfig {
   /** Base URL of the apps/api proxy, e.g. "/api" or "http://localhost:8787". */
   apiBase: string;
   voiceId: string;
+  /** Bearer token for the API, if it is configured with API_TOKEN. */
+  token?: string;
+  voiceSettings?: VoiceSettings;
 }
 
-function fetchAudio(c: Chunk, { db, apiBase, voiceId }: PlayerConfig): Promise<string> {
-  const key = audioKey(voiceId, c.hash);
+function fetchAudio(c: Chunk, { db, apiBase, voiceId, token, voiceSettings }: PlayerConfig): Promise<string> {
+  // Persistent key includes voice settings: changing them must not replay audio rendered with the old ones.
+  const key = audioKey(voiceSettings ? `${voiceId}~${hashText(JSON.stringify(voiceSettings))}` : voiceId, c.hash);
   const cacheKey = `${apiBase}|${key}`;
   let p = cache.get(cacheKey);
   if (!p) {
@@ -21,7 +26,7 @@ function fetchAudio(c: Chunk, { db, apiBase, voiceId }: PlayerConfig): Promise<s
       // Persistent cache first: replays and post-crash resumes cost no API characters.
       const cached = await getAudio(db, key).catch(() => undefined);
       if (cached) return URL.createObjectURL(cached);
-      const r = await fetch(`${apiBase}/tts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toTtsRequest(c, voiceId)) });
+      const r = await fetch(`${apiBase}/tts`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(toTtsRequest(c, voiceId, undefined, voiceSettings)) });
       if (r.status === 429 || r.status >= 500) throw new Error(`tts ${r.status}`);
       if (!r.ok) throw Object.assign(new Error(`tts ${r.status}`), { fatal: true });
       const blob = await r.blob();

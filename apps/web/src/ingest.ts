@@ -3,6 +3,7 @@ import {
   createOcr, ocrToBlocks, resumeInterrupted, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
   type Block, type Item,
 } from "@eleven-port/core";
+import { apiFetch } from "./api";
 import { db } from "./db";
 
 const titleFrom = (blocks: Block[], fallback: string) => blocks.find((b) => b.type === "heading")?.text ?? fallback;
@@ -37,7 +38,7 @@ export async function ingestMarkdown(name: string, text: string): Promise<Item> 
 
 export async function ingestUrl(url: string): Promise<Item> {
   const res = await withRetry(async () => {
-    const r = await fetch(`/api/fetch?url=${encodeURIComponent(url)}`);
+    const r = await apiFetch(`/fetch?url=${encodeURIComponent(url)}`);
     if (r.status >= 500 || r.status === 429) throw new Error(`fetch ${r.status}`);
     return r;
   });
@@ -98,7 +99,7 @@ export async function retryFailed(item: Item, onProgress?: (d: number, t: number
   }
   if (item.kind === "article" && /^https?:/.test(item.source)) {
     const res = await withRetry(async () => {
-      const r = await fetch(`/api/fetch?url=${encodeURIComponent(item.source)}`);
+      const r = await apiFetch(`/fetch?url=${encodeURIComponent(item.source)}`);
       if (r.status >= 500 || r.status === 429) throw new Error(`fetch ${r.status}`);
       return r;
     });

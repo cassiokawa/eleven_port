@@ -56,9 +56,16 @@ export interface TtsRequest {
   next_text?: string;
   voice_id: string;
   model_id?: string;
+  voice_settings?: VoiceSettings;
+}
+
+export interface VoiceSettings {
+  stability?: number;
+  similarity_boost?: number;
+  style?: number;
 }
 
 /** Build the request body for the apps/api ElevenLabs proxy. */
-export function toTtsRequest(c: Chunk, voiceId: string, modelId = "eleven_multilingual_v2"): TtsRequest {
-  return { text: c.text, previous_text: c.previous || undefined, next_text: c.next || undefined, voice_id: voiceId, model_id: modelId };
+export function toTtsRequest(c: Chunk, voiceId: string, modelId = "eleven_multilingual_v2", voiceSettings?: VoiceSettings): TtsRequest {
+  return { text: c.text, previous_text: c.previous || undefined, next_text: c.next || undefined, voice_id: voiceId, model_id: modelId, voice_settings: voiceSettings };
 }

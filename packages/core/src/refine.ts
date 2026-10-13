@@ -41,7 +41,7 @@ class HttpError extends Error {
  * Ask the API to refine the local result with Claude. Retries transient failures (and waits while
  * offline), but a missing key (501) or bad request fails fast so the caller keeps the local result.
  */
-export async function refineSuggestions(apiBase: string, ctx: SuggestContext, local: Suggestions, fetchImpl: typeof fetch = fetch): Promise<Suggestions> {
+export async function refineSuggestions(apiBase: string, ctx: SuggestContext, local: Suggestions, fetchImpl: typeof fetch = fetch, token?: string): Promise<Suggestions> {
   const body = JSON.stringify({
     title: ctx.title,
     excerpt: blocksToMarkdown(ctx.blocks).slice(0, 6000),
@@ -52,7 +52,7 @@ export async function refineSuggestions(apiBase: string, ctx: SuggestContext, lo
   });
   const res = await withRetry(
     async () => {
-      const r = await fetchImpl(`${apiBase}/suggest`, { method: "POST", headers: { "content-type": "application/json" }, body });
+      const r = await fetchImpl(`${apiBase}/suggest`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body });
       if (r.status === 429 || r.status === 502 || r.status === 503) throw new HttpError(r.status);
       return r;
     },

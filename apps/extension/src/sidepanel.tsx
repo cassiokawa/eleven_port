@@ -29,6 +29,7 @@ function Panel() {
   const [error, setError] = useState("");
   const [api, setApi] = useState(DEFAULT_API);
   const [voice, setVoice] = useState(DEFAULT_VOICE);
+  const [token, setToken] = useState("");
   const [bookId, setBookId] = useState<string>();
   const [capturing, setCapturing] = useState(false);
   const abort = useRef<AbortController | undefined>(undefined);
@@ -39,6 +40,7 @@ function Panel() {
     void refresh();
     void store.get("api", DEFAULT_API).then(setApi);
     void store.get("voice", DEFAULT_VOICE).then(setVoice);
+    void store.get("token", "").then(setToken);
     void store.get<string | undefined>("bookId", undefined).then(setBookId);
   }, [refresh]);
 
@@ -108,7 +110,7 @@ function Panel() {
     const start = item.position?.part === -1 ? item.position.chunk : 0;
     player.current = narrate(
       md,
-      { db, apiBase: api, voiceId: voice },
+      { db, apiBase: api, voiceId: voice, token: token || undefined },
       {
         onChunk: (i, n) => { setStatus(`Narrating ${i + 1}/${n}`); void savePosition(db, item.id, -1, i); },
         onDone: () => { setStatus(""); void savePosition(db, item.id, -1, 0); },
@@ -149,6 +151,7 @@ function Panel() {
       <details>
         <summary>Settings</summary>
         <label>API <input value={api} onChange={(e) => { setApi(e.target.value); void store.set("api", e.target.value); }} /></label>
+        <label>API token <input type="password" value={token} onChange={(e) => { setToken(e.target.value); void store.set("token", e.target.value); }} /></label>
         <label>Voice ID <input value={voice} onChange={(e) => { setVoice(e.target.value); void store.set("voice", e.target.value); }} /></label>
       </details>
     </div>
