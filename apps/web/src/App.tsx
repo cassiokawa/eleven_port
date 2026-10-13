@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildToc, collectionTree, deleteCollection, exportArchive, getParts, importArchive, itemToMarkdown, listItems,
   moveItem, parseMarkdown, renameCollection, savePosition, searchIndex, suggestCollection, suggestTags, tocToMarkdown,
-  blocksToMarkdown, updatePart, type CollectionNode, type Item, type Part,
+  blocksToMarkdown, narrate, updatePart, type Player, type CollectionNode, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
 import { ingestMarkdown, ingestPdf, ingestUrl, resumePending, retryFailed } from "./ingest";
-import { narrate, type Player } from "./player";
+
 
 const VOICE = "21m00Tcm4TlvDq8ikWAM";
 
@@ -132,7 +132,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
     const start = resume && item?.position?.part === part ? item.position.chunk : 0;
     player.current = narrate(
       text,
-      VOICE,
+      { db, apiBase: "/api", voiceId: VOICE },
       {
         onChunk: (i, n) => { setPos({ i, n }); void savePosition(db, id, part, i); },
         onDone: () => { setPos(null); void savePosition(db, id, part, 0); },

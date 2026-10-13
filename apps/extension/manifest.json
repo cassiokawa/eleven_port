@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "eleven_port",
+  "version": "0.1.0",
+  "description": "Capture web pages, the visible screen and Kindle Cloud Reader books; build Markdown; narrate with ElevenLabs.",
+  "action": { "default_title": "Open eleven_port" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage", "unlimitedStorage"],
+  "host_permissions": ["https://read.amazon.com/*", "http://localhost:8787/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": []
+}

@@ -6,9 +6,17 @@ export interface Ocr {
 }
 
 /** Lazily create a tesseract.js worker; one worker is reused across pages. */
-export async function createOcr(lang = "eng"): Promise<Ocr> {
+export interface OcrAssets {
+  /** URLs of locally bundled assets; required where remote scripts are blocked (extension CSP) or offline. */
+  workerPath?: string;
+  corePath?: string;
+  langPath?: string;
+}
+
+export async function createOcr(lang = "eng", assets: OcrAssets = {}): Promise<Ocr> {
   const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker(lang);
+  const local = !!(assets.workerPath || assets.corePath || assets.langPath);
+  const worker = await createWorker(lang, 1, { ...assets, ...(local ? { workerBlobURL: false, gzip: true } : {}) });
   return {
     async recognize(img) {
       const { data } = await worker.recognize(img as never);

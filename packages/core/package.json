@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "dexie": "^4.0.0",
     "fflate": "^0.8.3",
     "minisearch": "^7.2.0",
