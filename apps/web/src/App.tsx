@@ -1,0 +1,163 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  buildToc, exportArchive, getParts, importArchive, itemToMarkdown, listItems, refreshStatus, savePart,
+  searchIndex, suggestCollection, suggestTags, tocToMarkdown, blocksToMarkdown, type Item, type Part,
+} from "@eleven-port/core";
+import { db } from "./db";
+import { ingestMarkdown, ingestPdf, ingestUrl } from "./ingest";
+import { narrate, type Player } from "./player";
+
+const VOICE = "21m00Tcm4TlvDq8ikWAM";
+
+function download(name: string, data: BlobPart, type: string) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = name;
+  a.click();
+}
+
+export function App() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [query, setQuery] = useState("");
+  const [tag, setTag] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    let list = await listItems(db, { tag: tag || undefined });
+    if (query.trim()) {
+      const ids = new Set((await searchIndex(db)).search(query, { prefix: true }).map((h) => h.itemId as string));
+      list = list.filter((i) => ids.has(i.id));
+    }
+    setItems(list);
+  }, [query, tag]);
+  useEffect(() => void refresh(), [refresh]);
+
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(label);
+    setError("");
+    try { await fn(); } catch (e) { setError((e as Error).message); }
+    setBusy("");
+    await refresh();
+  };
+
+  const onFiles = (files: FileList | null) =>
+    files && [...files].forEach((f) =>
+      run(`Importing ${f.name}`, async () => {
+        if (/\.pdf$/i.test(f.name)) await ingestPdf(f.name, new Uint8Array(await f.arrayBuffer()), (d, t) => setBusy(`${f.name}: ${d}/${t} pages`));
+        else if (/\.zip$/i.test(f.name)) await importArchive(db, new Uint8Array(await f.arrayBuffer()));
+        else await ingestMarkdown(f.name, await f.text());
+      }),
+    );
+
+  const urlRef = useRef<HTMLInputElement>(null);
+
+  if (open) return <Reader id={open} onBack={() => { setOpen(null); void refresh(); }} />;
+
+  return (
+    <main style={{ maxWidth: 820, margin: "2rem auto", padding: "0 1rem", fontFamily: "system-ui" }}>
+      <h1>eleven_port</h1>
+      <section onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); onFiles(e.dataTransfer.files); }}
+        style={{ border: "2px dashed #999", padding: "1rem", borderRadius: 8 }}>
+        <p>Drop PDF, Markdown or archive (.zip) files here, or <input type="file" multiple onChange={(e) => onFiles(e.target.files)} /></p>
+        <form onSubmit={(e) => { e.preventDefault(); const u = urlRef.current!.value.trim(); if (u) void run("Fetching URL", () => ingestUrl(u)); }}>
+          <input ref={urlRef} placeholder="https://example.com/article" style={{ width: "70%" }} /> <button>Import URL</button>
+        </form>
+      </section>
+      {busy && <p>{busy}</p>}
+      {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
+      <p>
+        <input placeholder="Search library" value={query} onChange={(e) => setQuery(e.target.value)} />{" "}
+        <input placeholder="Filter by tag" value={tag} onChange={(e) => setTag(e.target.value)} />{" "}
+        <button onClick={() => void run("Exporting", async () => download("library.zip", await exportArchive(db) as BlobPart, "application/zip"))}>Export library</button>
+      </p>
+      <ul style={{ listStyle: "none", padding: 0 }}>
+        {items.map((i) => (
+          <li key={i.id} style={{ padding: ".5rem 0", borderBottom: "1px solid #ddd" }}>
+            <button onClick={() => setOpen(i.id)} style={{ all: "unset", cursor: "pointer", fontWeight: 600 }}>{i.title}</button>{" "}
+            <small>{i.kind} · {i.status}{i.collection ? ` · ${i.collection}` : ""}{i.tags.length ? ` · ${i.tags.join(", ")}` : ""}</small>
+          </li>
+        ))}
+        {!items.length && <li>No items yet.</li>}
+      </ul>
+    </main>
+  );
+}
+
+function Reader({ id, onBack }: { id: string; onBack: () => void }) {
+  const [item, setItem] = useState<Item>();
+  const [parts, setParts] = useState<Part[]>([]);
+  const [pos, setPos] = useState<{ i: number; n: number } | null>(null);
+  const [err, setErr] = useState("");
+  const [sugg, setSugg] = useState<{ tags: ReturnType<typeof suggestTags>; collection?: string; toc: string }>();
+  const player = useRef<Player | undefined>(undefined);
+
+  const load = useCallback(async () => {
+    setItem(await db.items.get(id));
+    setParts(await getParts(db, id));
+  }, [id]);
+  useEffect(() => { void load(); return () => player.current?.stop(); }, [load]);
+
+  const play = (text: string) => {
+    player.current?.stop();
+    setErr("");
+    player.current = narrate(text, VOICE, { onChunk: (i, n) => setPos({ i, n }), onDone: () => setPos(null), onError: (e) => setErr(e.message) });
+  };
+
+  const suggest = async () => {
+    const md = await itemToMarkdown(db, id);
+    const all = await db.items.toArray();
+    const vocab = [...new Set(all.flatMap((i) => i.tags))];
+    const toc = tocToMarkdown(buildToc(parts.flatMap((p) => p.blocks)));
+    setSugg({ tags: suggestTags(md, vocab), collection: suggestCollection(md, all.map((i) => i.collection).filter((c): c is string => !!c)), toc });
+  };
+
+  const applyTag = async (t: string) => {
+    if (!item) return;
+    await db.items.update(id, { tags: [...new Set([...item.tags, t])] });
+    await load();
+  };
+
+  const retryPart = async (p: Part) => {
+    // Re-processing a failed part needs the original source; for now allow manual replacement.
+    const text = prompt(`Paste text for ${p.title || `part ${p.index + 1}`}`);
+    if (!text) return;
+    await savePart(db, id, p.index, p.title, [{ type: "paragraph", text }]);
+    await refreshStatus(db, id, parts.length);
+    await load();
+  };
+
+  if (!item) return <p>Loading…</p>;
+  return (
+    <main style={{ maxWidth: 820, margin: "2rem auto", padding: "0 1rem", fontFamily: "system-ui" }}>
+      <button onClick={onBack}>← Library</button>
+      <h1>{item.title}</h1>
+      <p><small>{item.kind} · {item.status} · {item.source}</small></p>
+      <p>
+        <button onClick={async () => play(await itemToMarkdown(db, id))}>▶ Narrate all</button>{" "}
+        <button onClick={() => { player.current?.stop(); setPos(null); }}>■ Stop</button>{" "}
+        <button onClick={async () => download(`${item.title}.md`, await itemToMarkdown(db, id), "text/markdown")}>Export .md</button>{" "}
+        <button onClick={() => void suggest()}>Suggest tags / index</button>{" "}
+        <button onClick={async () => { if (confirm("Delete this item?")) { await db.parts.where("itemId").equals(id).delete(); await db.items.delete(id); onBack(); } }}>Delete</button>
+      </p>
+      {pos && <p>Narrating chunk {pos.i + 1}/{pos.n}</p>}
+      {err && <p role="alert" style={{ color: "crimson" }}>{err}</p>}
+      {sugg && (
+        <section style={{ background: "#f4f4f4", padding: ".75rem", borderRadius: 6 }}>
+          <strong>Suggested tags</strong>{" "}
+          {sugg.tags.map((t) => <button key={t.tag} onClick={() => void applyTag(t.tag)}>{t.existing ? "" : "+ "}{t.tag}</button>)}
+          {sugg.collection && <p>Suggested collection: <button onClick={async () => { await db.items.update(id, { collection: sugg.collection }); await load(); }}>{sugg.collection}</button></p>}
+          {sugg.toc && <details open><summary>Proposed index</summary><pre>{sugg.toc}</pre></details>}
+        </section>
+      )}
+      {parts.map((p) => (
+        <article key={p.id} style={{ borderTop: "1px solid #ddd", marginTop: "1rem" }}>
+          <h3>{p.title || `Part ${p.index + 1}`} {p.status !== "ok" && <em style={{ color: "crimson" }}>({p.status})</em>}</h3>
+          {p.status === "ok" ? <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{blocksToMarkdown(p.blocks)}</pre> : <button onClick={() => void retryPart(p)}>Replace manually</button>}
+          {p.status === "ok" && <button onClick={() => play(blocksToMarkdown(p.blocks))}>▶ Narrate this part</button>}
+        </article>
+      ))}
+    </main>
+  );
+}
