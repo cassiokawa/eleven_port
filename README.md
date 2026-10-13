@@ -33,6 +33,14 @@ Each capability can run in the cloud or on your machine. The API picks the engin
 | Narration | `TTS_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` | `TTS_PROVIDER=local` + `LOCAL_TTS_URL` pointing at an OpenAI-compatible `/v1/audio/speech` server such as Kokoro-FastAPI. **Ollama cannot generate speech**, so this is a separate server |
 | OCR | Bundled Tesseract (always available, runs in the browser) | `OLLAMA_VISION_MODEL` + choose "Local vision model" in settings; any failure falls back to Tesseract per page |
 
+### Fully local quick start (Ollama + Kokoro)
+
+1. `ollama pull gemma4:12b` (confirm `ollama show gemma4:12b` lists `vision`).
+2. Start [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) (needs `espeak-ng`; on Apple Silicon use its native MPS start script). It serves `http://localhost:8880`.
+3. `cp .env.local-models.example .env` and adjust the model and voice names.
+4. `npm run doctor -w @eleven-port/api`. It checks Ollama, the models and their vision capability, the TTS server and voice, and synthesizes a test phrase. Fix every `FAIL` before starting the API.
+5. `npm run dev -w @eleven-port/api`, then `GET /config` should report `ollama` and `local`.
+
 Notes: local TTS ignores ElevenLabs-only options (voice stability/similarity and neighbouring-text context), so chunk joins can sound slightly less natural. Vision-model OCR is much slower than Tesseract, so capturing a whole book with it takes far longer; Tesseract stays the default. Small local models give weaker tags than Claude.
 
 ## Reliability model
