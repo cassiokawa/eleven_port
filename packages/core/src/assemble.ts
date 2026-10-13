@@ -34,6 +34,11 @@ export function joinPages(pages: string[]): string {
     }
     const next = trimOverlap(out, page).trimStart();
     if (!next) continue;
+    // A word hyphenated across the page break: "tor-" + "rents" -> "torrents".
+    if (/[a-z]-$/.test(out) && /^[a-z]/.test(next)) {
+      out = out.slice(0, -1) + next;
+      continue;
+    }
     const continues = !/[.!?:"')\]]\s*$/.test(out) && !/^[#>\-*\d]/.test(next);
     out += continues ? " " + next : "\n\n" + next;
   }

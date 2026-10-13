@@ -22,3 +22,9 @@ describe("assemble", () => {
     expect(blocksToMarkdown(parseMarkdown(md))).toBe(md);
   });
 });
+
+describe("cross-page hyphenation", () => {
+  it("joins a word split by hyphen at a page break", () => {
+    expect(assemblePages(["it fell in tor-", "rents across town."])[0]!.text).toBe("it fell in torrents across town.");
+  });
+});

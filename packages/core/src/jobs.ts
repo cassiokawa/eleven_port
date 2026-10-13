@@ -113,3 +113,13 @@ export async function retryFailed(db: LibraryDB, jobId: string): Promise<number>
   await db.units.bulkPut(failed.map((u) => ({ ...u, status: "pending", attempts: 0 })));
   return failed.length;
 }
+
+/** Get or create the open-ended job for an item (unknown page count, e.g. a book being captured). */
+export async function createJobOpen(db: LibraryDB, itemId: string, now = Date.now()): Promise<Job> {
+  const id = `${itemId}:open`;
+  const existing = await db.jobs.get(id);
+  if (existing) return existing;
+  const job: Job = { id, itemId, state: "queued", createdAt: now, updatedAt: now };
+  await db.jobs.put(job);
+  return job;
+}
