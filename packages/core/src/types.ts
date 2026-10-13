@@ -29,6 +29,8 @@ export interface Item {
   status: DocStatus;
   tags: string[];
   collection?: string;
+  /** Last narration position, so playback resumes where it stopped. */
+  position?: { part: number; chunk: number };
 }
 
 export type JobState =
@@ -61,4 +63,23 @@ export interface Unit {
   hash?: string;
   payload?: string;
   error?: string;
+}
+
+/** Original source bytes (e.g. the PDF) kept so failed parts can be reprocessed later. */
+export interface BlobEntry {
+  id: string; // itemId
+  data: Uint8Array;
+  type: string;
+}
+
+/** Cached narration audio keyed by voice + chunk content hash. */
+export interface AudioEntry {
+  key: string;
+  data: Blob;
+  createdAt: number;
+}
+
+/** Folder in the collection tree; path like "Science/Physics". */
+export interface Collection {
+  path: string;
 }

@@ -4,7 +4,7 @@ import {
   searchIndex, suggestCollection, suggestTags, tocToMarkdown, blocksToMarkdown, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
-import { ingestMarkdown, ingestPdf, ingestUrl } from "./ingest";
+import { ingestMarkdown, ingestPdf, ingestUrl, retryFailed } from "./ingest";
 import { narrate, type Player } from "./player";
 
 const VOICE = "21m00Tcm4TlvDq8ikWAM";
@@ -90,6 +90,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [pos, setPos] = useState<{ i: number; n: number } | null>(null);
   const [err, setErr] = useState("");
+  const [prog, setProg] = useState("");
   const [sugg, setSugg] = useState<{ tags: ReturnType<typeof suggestTags>; collection?: string; toc: string }>();
   const player = useRef<Player | undefined>(undefined);
 
@@ -139,9 +140,23 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
         <button onClick={() => { player.current?.stop(); setPos(null); }}>■ Stop</button>{" "}
         <button onClick={async () => download(`${item.title}.md`, await itemToMarkdown(db, id), "text/markdown")}>Export .md</button>{" "}
         <button onClick={() => void suggest()}>Suggest tags / index</button>{" "}
+        {parts.some((p) => p.status !== "ok") && (
+          <button
+            onClick={async () => {
+              setErr("");
+              try {
+                const r = await retryFailed(item, (d, t) => setProg(`Reprocessing part ${d}/${t}`));
+                setErr(`Retried: ${r.fixed} fixed, ${r.failed} still failing`);
+              } catch (e) { setErr((e as Error).message); }
+              setProg("");
+              await load();
+            }}
+          >Retry failed parts</button>
+        )}{" "}
         <button onClick={async () => { if (confirm("Delete this item?")) { await db.parts.where("itemId").equals(id).delete(); await db.items.delete(id); onBack(); } }}>Delete</button>
       </p>
       {pos && <p>Narrating chunk {pos.i + 1}/{pos.n}</p>}
+      {prog && <p>{prog}</p>}
       {err && <p role="alert" style={{ color: "crimson" }}>{err}</p>}
       {sugg && (
         <section style={{ background: "#f4f4f4", padding: ".75rem", borderRadius: 6 }}>

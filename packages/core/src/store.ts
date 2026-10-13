@@ -1,11 +1,14 @@
 import Dexie, { type Table } from "dexie";
-import type { Item, Job, Part, Unit } from "./types";
+import type { AudioEntry, BlobEntry, Collection, Item, Job, Part, Unit } from "./types";
 
 export class LibraryDB extends Dexie {
   items!: Table<Item, string>;
   parts!: Table<Part, string>;
   jobs!: Table<Job, string>;
   units!: Table<Unit, string>;
+  blobs!: Table<BlobEntry, string>;
+  audio!: Table<AudioEntry, string>;
+  collections!: Table<Collection, string>;
 
   constructor(name = "eleven-port") {
     super(name);
@@ -14,6 +17,11 @@ export class LibraryDB extends Dexie {
       parts: "id, itemId, [itemId+index]",
       jobs: "id, itemId, state",
       units: "id, jobId, [jobId+index], [jobId+status]",
+    });
+    this.version(2).stores({
+      blobs: "id",
+      audio: "key, createdAt",
+      collections: "path",
     });
   }
 }

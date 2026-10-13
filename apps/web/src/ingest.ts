@@ -1,6 +1,7 @@
 import {
   addItem, assemblePages, buildToc, createJob, extractPdf, extractWeb, normalizeHeadings, parseMarkdown,
-  refreshStatus, runJob, savePart, withRetry, type Block, type Item,
+  createOcr, ocrToBlocks, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
+  type Block, type Item,
 } from "@eleven-port/core";
 import { db } from "./db";
 
@@ -55,6 +56,8 @@ export async function ingestUrl(url: string): Promise<Item> {
 export async function ingestPdf(name: string, data: Uint8Array, onProgress?: (d: number, t: number) => void): Promise<Item> {
   const pages = await extractPdf(data);
   const item = await addItem(db, { kind: "pdf", title: name.replace(/\.pdf$/i, ""), source: `file:${name}` });
+  // Keep the original bytes so scanned/failed pages can be OCR'd or retried later, even after a reload.
+  await db.blobs.put({ id: item.id, data, type: "application/pdf" });
   const job = await createJob(db, item.id, pages.length);
   await runJob(
     db,
@@ -74,6 +77,39 @@ export async function ingestPdf(name: string, data: Uint8Array, onProgress?: (d:
   }
   await refreshStatus(db, item.id, pages.length);
   return item;
+}
+
+/** Re-run failed parts: OCR for PDF pages, re-fetch for URL articles. */
+export async function retryFailed(item: Item, onProgress?: (d: number, t: number) => void) {
+  if (item.kind === "pdf") {
+    const blob = await db.blobs.get(item.id);
+    if (!blob) throw new Error("original PDF not stored; re-import the file");
+    const ocr = await createOcr();
+    try {
+      return await reprocessFailedParts(
+        db,
+        item.id,
+        async (part) => ocrToBlocks(ocr, await renderPdfPage(blob.data, part.index + 1)),
+        onProgress,
+      );
+    } finally {
+      await ocr.terminate();
+    }
+  }
+  if (item.kind === "article" && /^https?:/.test(item.source)) {
+    const res = await withRetry(async () => {
+      const r = await fetch(`/api/fetch?url=${encodeURIComponent(item.source)}`);
+      if (r.status >= 500 || r.status === 429) throw new Error(`fetch ${r.status}`);
+      return r;
+    });
+    if (!res.ok) throw new Error(`fetch failed (${res.status})`);
+    const doc = new DOMParser().parseFromString((await res.json()).body, "text/html");
+    const ex = extractWeb(doc);
+    if (!ex) throw new Error("no readable article found");
+    const parts = splitParts(ex.blocks);
+    return reprocessFailedParts(db, item.id, async (p) => parts[p.index]?.blocks ?? [], onProgress);
+  }
+  throw new Error(`cannot reprocess ${item.kind} items automatically`);
 }
 
 export { assemblePages, buildToc };

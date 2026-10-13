@@ -29,3 +29,11 @@ export function cleanOcrText(raw: string): string {
     .filter(Boolean)
     .join("\n\n");
 }
+
+import { parseMarkdown } from "../markdown";
+import type { Block } from "../types";
+
+/** OCR a rendered page image into blocks. */
+export async function ocrToBlocks(ocr: Ocr, img: OcrSource): Promise<Block[]> {
+  return parseMarkdown(cleanOcrText(await ocr.recognize(img)));
+}

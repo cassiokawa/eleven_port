@@ -92,3 +92,23 @@ export async function extractPdf(data: Uint8Array): Promise<PdfPageResult[]> {
   await task.destroy();
   return out;
 }
+
+export type PageRenderer = (data: Uint8Array, page: number) => Promise<HTMLCanvasElement>;
+
+/** Render one PDF page to a canvas (browser only). */
+export const renderPdfPage: PageRenderer = async (data, pageNo) => {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const task = pdfjs.getDocument({ data: data.slice(), useSystemFonts: true });
+  try {
+    const doc = await task.promise;
+    const page = await doc.getPage(pageNo);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }).promise;
+    return canvas;
+  } finally {
+    await task.destroy();
+  }
+};
