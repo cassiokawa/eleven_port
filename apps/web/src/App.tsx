@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   collectionTree, deleteCollection, exportArchive, getParts, importArchive, itemToMarkdown, listItems,
   moveItem, parseMarkdown, renameCollection, savePosition, searchIndex,
-  blocksToMarkdown, localSuggestions, narrate, refineSuggestions, type Suggestions, updatePart, type Player, type CollectionNode, type Item, type Part,
+  blocksToMarkdown, localSuggestions, type ServerConfig, narrate, refineSuggestions, type Suggestions, updatePart, type Player, type CollectionNode, type Item, type Part,
 } from "@eleven-port/core";
 import { db } from "./db";
+import { getServerConfig } from "./api";
 import { loadSettings, saveSettings, type Settings } from "./settings";
 import { ingestMarkdown, ingestPdf, ingestUrl, resumePending, retryFailed } from "./ingest";
 
@@ -94,17 +95,35 @@ export function App() {
 
 function SettingsPanel() {
   const [s, setS] = useState<Settings>(loadSettings);
+  const [server, setServer] = useState<ServerConfig | undefined>();
+  useEffect(() => { void getServerConfig(true).then(setServer); }, [s.token]);
   const set = (patch: Partial<Settings>) => { const n = { ...s, ...patch }; setS(n); saveSettings(n); };
+  const localTts = server?.tts === "local";
   return (
     <details>
-      <summary>Voice and API settings</summary>
+      <summary>Voice, engines and API settings</summary>
       <p>
-        <label>Voice ID <input value={s.voiceId} onChange={(e) => set({ voiceId: e.target.value })} /></label>{" "}
-        <label>API token <input type="password" value={s.token} onChange={(e) => set({ token: e.target.value })} /></label>
+        {server
+          ? <small>Server: suggestions via <b>{server.llm}</b>{server.llmConfigured ? "" : " (not configured)"} · narration via <b>{server.tts}</b>{server.ttsConfigured ? "" : " (not configured)"}</small>
+          : <small>API server not reachable</small>}
       </p>
       <p>
-        <label>Stability {s.stability} <input type="range" min={0} max={1} step={0.05} value={s.stability} onChange={(e) => set({ stability: Number(e.target.value) })} /></label>{" "}
-        <label>Similarity {s.similarity} <input type="range" min={0} max={1} step={0.05} value={s.similarity} onChange={(e) => set({ similarity: Number(e.target.value) })} /></label>
+        <label>Voice {localTts ? "name" : "ID"} <input value={s.voiceId} onChange={(e) => set({ voiceId: e.target.value })} /></label>{" "}
+        <label>API token <input type="password" value={s.token} onChange={(e) => set({ token: e.target.value })} /></label>
+      </p>
+      {!localTts && (
+        <p>
+          <label>Stability {s.stability} <input type="range" min={0} max={1} step={0.05} value={s.stability} onChange={(e) => set({ stability: Number(e.target.value) })} /></label>{" "}
+          <label>Similarity {s.similarity} <input type="range" min={0} max={1} step={0.05} value={s.similarity} onChange={(e) => set({ similarity: Number(e.target.value) })} /></label>
+        </p>
+      )}
+      <p>
+        <label>OCR engine for scanned pages{" "}
+          <select value={s.ocrEngine} onChange={(e) => set({ ocrEngine: e.target.value as Settings["ocrEngine"] })}>
+            <option value="tesseract">Tesseract (bundled, fast)</option>
+            <option value="local-vision" disabled={!server?.ocr.includes("local-vision")}>Local vision model (slower, set OLLAMA_VISION_MODEL)</option>
+          </select>
+        </label>
       </p>
     </details>
   );
@@ -145,14 +164,15 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   useEffect(() => { void load(); return () => player.current?.stop(); }, [load]);
 
   // part = -1 narrates the whole item; resume continues from the saved chunk.
-  const play = (text: string, part = -1, resume = false) => {
+  const play = async (text: string, part = -1, resume = false) => {
     player.current?.stop();
     const cfg = loadSettings();
+    const server = await getServerConfig();
     setErr("");
     const start = resume && item?.position?.part === part ? item.position.chunk : 0;
     player.current = narrate(
       text,
-      { db, apiBase: "/api", voiceId: cfg.voiceId, token: cfg.token || undefined, voiceSettings: { stability: cfg.stability, similarity_boost: cfg.similarity } },
+      { db, apiBase: "/api", voiceId: cfg.voiceId, token: cfg.token || undefined, voiceSettings: server?.tts === "local" ? undefined : { stability: cfg.stability, similarity_boost: cfg.similarity }, engine: server?.tts },
       {
         onChunk: (i, n) => { setPos({ i, n }); void savePosition(db, id, part, i); },
         onDone: () => { setPos(null); void savePosition(db, id, part, 0); },

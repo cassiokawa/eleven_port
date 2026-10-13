@@ -3,10 +3,11 @@ export interface Settings {
   token: string;
   stability: number;
   similarity: number;
+  ocrEngine: "tesseract" | "local-vision";
 }
 
 const KEY = "eleven-port-settings";
-export const DEFAULTS: Settings = { voiceId: "21m00Tcm4TlvDq8ikWAM", token: "", stability: 0.5, similarity: 0.75 };
+export const DEFAULTS: Settings = { voiceId: "21m00Tcm4TlvDq8ikWAM", token: "", stability: 0.5, similarity: 0.75, ocrEngine: "tesseract" };
 
 export function loadSettings(): Settings {
   try {

@@ -16,6 +16,25 @@ const server = createServer((req, res) => {
 }).listen(0);
 const base = `http://localhost:${server.address().port}`;
 
+// Stub of apps/api for the local-vision path: call 1 and 3+ answer, call 2 fails so the per-page fallback to Tesseract is exercised.
+let ocrCalls = 0;
+const api = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/config") return res.end(JSON.stringify({ llm: "ollama", llmConfigured: true, tts: "local", ttsConfigured: true, ocr: ["tesseract", "local-vision"] }));
+    if (req.url === "/ocr") {
+      const n = ++ocrCalls;
+      if (!JSON.parse(body).image?.startsWith("data:image/png;base64,")) return res.writeHead(400).end("{}");
+      if (n === 2) return res.writeHead(502).end("{}");
+      return res.end(JSON.stringify({ text: n === 1 ? "STUB PAGE ONE\n\nread by the local vision model." : "STUB PAGE THREE\n\nalso read by the local vision model." }));
+    }
+    res.writeHead(404).end("{}");
+  });
+}).listen(0);
+const apiBase = `http://localhost:${api.address().port}`;
+
 const ctx = await chromium.launchPersistentContext(mkdtempSync(join(tmpdir(), "ep-")), {
   executablePath: process.env.CHROMIUM_PATH,
   headless: false,
@@ -66,11 +85,32 @@ try {
   console.log("UNITS", JSON.stringify(units));
   check("OCR text reached the library", /lighthouse/i.test(md) && /fog|morning/i.test(md));
   check("chapters detected", /CHAPTER (ONE|TWO)/i.test(md));
+
+  // 3. Local vision OCR via the API, with per-page fallback to the bundled engine.
+  const rd2 = await ctx.newPage();
+  await rd2.goto(base + "/reader");
+  const panel3 = await ctx.newPage();
+  await panel3.goto(`chrome-extension://${extId}/sidepanel.html?targetTab=${await tabId(rd2)}`);
+  await panel3.evaluate((a) => chrome.storage.local.set({ api: a, ocrEngine: "local-vision" }), apiBase);
+  await panel3.reload();
+  await panel3.getByText("Server: suggestions ollama, narration local").waitFor({ state: "attached", timeout: 15000 }).catch(() => {});
+  await panel3.getByRole("button", { name: "Capture book (Kindle)" }).click();
+  await panel3.getByText(/^Done: \d+ pages/).waitFor({ timeout: 240000 });
+  const payloads = await panel3.evaluate(async () => {
+    const req = indexedDB.open("eleven-port");
+    const db = await new Promise((r) => (req.onsuccess = () => r(req.result)));
+    const q = db.transaction("units").objectStore("units").getAll();
+    return new Promise((r) => (q.onsuccess = () => r(q.result.filter((u) => u.jobId.includes(":open")).map((u) => u.payload))));
+  });
+  const vision = payloads.filter((t) => /STUB PAGE/.test(t));
+  check("local vision pages used the API", vision.length === 2, `(${vision.length} stub pages, ${ocrCalls} calls)`);
+  check("failed vision page fell back to Tesseract", payloads.some((t) => /stars|harbour/i.test(t) && !/STUB/.test(t)));
 } catch (e) {
   console.log("FAIL exception", e);
   failed++;
 } finally {
   await ctx.close();
   server.close();
+  api.close();
 }
 process.exit(failed ? 1 : 0);

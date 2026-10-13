@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  LibraryDB, addItem, captureBook, cleanOcrText, exportArchive, itemToMarkdown, listItems, narrate, parseMarkdown,
+  LibraryDB, addItem, captureBook, cleanOcrText, exportArchive, fetchServerConfig, type ServerConfig, itemToMarkdown, listItems, narrate, parseMarkdown,
   refreshStatus, savePart, savePosition, type Item, type Player,
 } from "@eleven-port/core";
-import { getOcr } from "./ocr";
+import { getOcr, type OcrEngine } from "./ocr";
 import { activeTab, cropDataUrl, extractFromTab, screenshot, turnPage } from "./tab";
 
 const db = new LibraryDB();
@@ -30,6 +30,8 @@ function Panel() {
   const [api, setApi] = useState(DEFAULT_API);
   const [voice, setVoice] = useState(DEFAULT_VOICE);
   const [token, setToken] = useState("");
+  const [ocrEngine, setOcrEngine] = useState<OcrEngine>("tesseract");
+  const [server, setServer] = useState<ServerConfig | undefined>();
   const [bookId, setBookId] = useState<string>();
   const [capturing, setCapturing] = useState(false);
   const abort = useRef<AbortController | undefined>(undefined);
@@ -41,8 +43,14 @@ function Panel() {
     void store.get("api", DEFAULT_API).then(setApi);
     void store.get("voice", DEFAULT_VOICE).then(setVoice);
     void store.get("token", "").then(setToken);
+    void store.get<OcrEngine>("ocrEngine", "tesseract").then(setOcrEngine);
     void store.get<string | undefined>("bookId", undefined).then(setBookId);
   }, [refresh]);
+
+  useEffect(() => {
+    const t = setTimeout(() => void fetchServerConfig(api, token || undefined).then(setServer), 400);
+    return () => clearTimeout(t);
+  }, [api, token]);
 
   const guard = async (label: string, fn: () => Promise<void>) => {
     setError("");
@@ -63,7 +71,7 @@ function Panel() {
 
   const captureScreen = () => guard("Reading screen (OCR)…", async () => {
     const tab = await activeTab();
-    const ocr = await getOcr();
+    const ocr = await getOcr(ocrEngine, api, token || undefined);
     const text = cleanOcrText(await ocr.recognize(await screenshot(tab.windowId)));
     if (!text) throw new Error("no text recognized on screen");
     const item = await addItem(db, { kind: "note", title: `Screen: ${tab.title ?? "capture"}`, source: tab.url ?? "screen" });
@@ -80,7 +88,7 @@ function Panel() {
       const id = resumeId ?? (await addItem(db, { kind: "book", title: tab.title?.replace(/^Amazon\.com:\s*/, "") ?? "Kindle book", source: tab.url ?? "kindle" })).id;
       setBookId(id);
       await store.set("bookId", id);
-      const ocr = await getOcr();
+      const ocr = await getOcr(ocrEngine, api, token || undefined);
       const crop = { top: 0.08, bottom: 0.08, left: 0.1, right: 0.1 };
       const res = await captureBook(
         db,
@@ -110,7 +118,7 @@ function Panel() {
     const start = item.position?.part === -1 ? item.position.chunk : 0;
     player.current = narrate(
       md,
-      { db, apiBase: api, voiceId: voice, token: token || undefined },
+      { db, apiBase: api, voiceId: voice, token: token || undefined, engine: server?.tts },
       {
         onChunk: (i, n) => { setStatus(`Narrating ${i + 1}/${n}`); void savePosition(db, item.id, -1, i); },
         onDone: () => { setStatus(""); void savePosition(db, item.id, -1, 0); },
@@ -152,6 +160,13 @@ function Panel() {
         <summary>Settings</summary>
         <label>API <input value={api} onChange={(e) => { setApi(e.target.value); void store.set("api", e.target.value); }} /></label>
         <label>API token <input type="password" value={token} onChange={(e) => { setToken(e.target.value); void store.set("token", e.target.value); }} /></label>
+        <p><small>{server ? `Server: suggestions ${server.llm}, narration ${server.tts}` : "API server not reachable"}</small></p>
+        <label>OCR engine{" "}
+          <select value={ocrEngine} onChange={(e) => { setOcrEngine(e.target.value as OcrEngine); void store.set("ocrEngine", e.target.value); }}>
+            <option value="tesseract">Tesseract (bundled, fast)</option>
+            <option value="local-vision" disabled={!server?.ocr.includes("local-vision")}>Local vision model (slow)</option>
+          </select>
+        </label>
         <label>Voice ID <input value={voice} onChange={(e) => { setVoice(e.target.value); void store.set("voice", e.target.value); }} /></label>
       </details>
     </div>

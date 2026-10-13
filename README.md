@@ -21,7 +21,19 @@ npm run dev -w @eleven-port/web      # proxies /api to the server
 npm run build -w @eleven-port/extension   # then load apps/extension/dist as an unpacked extension
 ```
 
-API environment: `ELEVENLABS_API_KEY` (narration), `ANTHROPIC_API_KEY` (optional refinement), `ANTHROPIC_MODEL` (default `claude-opus-5-5`), `API_TOKEN` (optional bearer auth), `ALLOWED_ORIGINS` (comma-separated browser origins; empty allows only same-origin/proxy use), `PORT`.
+API environment: see `.env.example`. `API_TOKEN` (optional bearer auth), `ALLOWED_ORIGINS` (comma-separated browser origins; empty allows only same-origin/proxy use), `PORT`.
+
+## Cloud or local models
+
+Each capability can run in the cloud or on your machine. The API picks the engine from its environment; the web app and extension show what is active under Settings.
+
+| Capability | Cloud (default) | Local |
+|---|---|---|
+| Tag / collection suggestions | `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | `LLM_PROVIDER=ollama` + `OLLAMA_MODEL` (any chat model you have pulled; schema-constrained JSON, one retry, then the built-in heuristic suggestions stay) |
+| Narration | `TTS_PROVIDER=elevenlabs` + `ELEVENLABS_API_KEY` | `TTS_PROVIDER=local` + `LOCAL_TTS_URL` pointing at an OpenAI-compatible `/v1/audio/speech` server such as Kokoro-FastAPI. **Ollama cannot generate speech**, so this is a separate server |
+| OCR | Bundled Tesseract (always available, runs in the browser) | `OLLAMA_VISION_MODEL` + choose "Local vision model" in settings; any failure falls back to Tesseract per page |
+
+Notes: local TTS ignores ElevenLabs-only options (voice stability/similarity and neighbouring-text context), so chunk joins can sound slightly less natural. Vision-model OCR is much slower than Tesseract, so capturing a whole book with it takes far longer; Tesseract stays the default. Small local models give weaker tags than Claude.
 
 ## Reliability model
 

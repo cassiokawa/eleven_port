@@ -29,8 +29,9 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 let failed = 0;
 const check = (name, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name} ${extra}`); if (!ok) failed++; };
 
-async function open(ctx, handler) {
+async function open(ctx, handler, config) {
   const page = await ctx.newPage();
+  if (config) await page.route("**/api/config", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(config) }));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/api/tts", handler);
@@ -81,7 +82,24 @@ try {
     await ctx.close();
   }
 
-  // 3. Library state survives a reload (IndexedDB), including a partial narration position.
+  // 3. With a local TTS engine, ElevenLabs-only options are not sent and the UI hides them.
+  {
+    const ctx = await browser.newContext();
+    const bodies = [];
+    const local = { llm: "ollama", llmConfigured: true, tts: "local", ttsConfigured: true, ocr: ["tesseract"] };
+    const { page } = await open(ctx, (route) => { bodies.push(JSON.parse(route.request().postData())); return route.fulfill({ status: 200, contentType: "audio/wav", body: wav() }); }, local);
+    await page.getByRole("button", { name: "← Library" }).click();
+    await page.getByText("Voice, engines and API settings").click();
+    await page.getByText(/narration via local/).waitFor({ timeout: 5000 });
+    check("stability slider hidden for local TTS", (await page.getByText(/Stability/).count()) === 0);
+    await page.getByText("Story").first().click();
+    await page.getByRole("button", { name: "▶ Narrate all" }).click();
+    await page.waitForFunction(() => !document.body.innerText.includes("Narrating chunk"), null, { timeout: 30000 });
+    check("local TTS request omits voice_settings", bodies.length >= 1 && bodies.every((b) => b.voice_settings === undefined), JSON.stringify(bodies[0]?.voice_settings));
+    await ctx.close();
+  }
+
+  // 4. Library state survives a reload (IndexedDB), including a partial narration position.
   {
     const ctx = await browser.newContext();
     const { page } = await open(ctx, (route) => route.fulfill({ status: 200, contentType: "audio/wav", body: wav() }));

@@ -14,11 +14,13 @@ export interface PlayerConfig {
   /** Bearer token for the API, if it is configured with API_TOKEN. */
   token?: string;
   voiceSettings?: VoiceSettings;
+  /** Active TTS engine (from /config). Part of the cache key so switching engines never replays stale audio. */
+  engine?: string;
 }
 
-function fetchAudio(c: Chunk, { db, apiBase, voiceId, token, voiceSettings }: PlayerConfig): Promise<string> {
+function fetchAudio(c: Chunk, { db, apiBase, voiceId, token, voiceSettings, engine }: PlayerConfig): Promise<string> {
   // Persistent key includes voice settings: changing them must not replay audio rendered with the old ones.
-  const key = audioKey(voiceSettings ? `${voiceId}~${hashText(JSON.stringify(voiceSettings))}` : voiceId, c.hash);
+  const key = audioKey(`${engine ?? ""}:${voiceSettings ? `${voiceId}~${hashText(JSON.stringify(voiceSettings))}` : voiceId}`, c.hash);
   const cacheKey = `${apiBase}|${key}`;
   let p = cache.get(cacheKey);
   if (!p) {

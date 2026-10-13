@@ -1,9 +1,10 @@
 import {
   addItem, assemblePages, buildToc, createJob, extractPdf, extractWeb, normalizeHeadings, parseMarkdown,
-  createOcr, ocrToBlocks, resumeInterrupted, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
+  createOcr, createRemoteOcr, ocrToBlocks, resumeInterrupted, refreshStatus, renderPdfPage, reprocessFailedParts, runJob, savePart, withRetry,
   type Block, type Item,
 } from "@eleven-port/core";
 import { apiFetch } from "./api";
+import { loadSettings } from "./settings";
 import { db } from "./db";
 
 const titleFrom = (blocks: Block[], fallback: string) => blocks.find((b) => b.type === "heading")?.text ?? fallback;
@@ -85,7 +86,9 @@ export async function retryFailed(item: Item, onProgress?: (d: number, t: number
   if (item.kind === "pdf") {
     const blob = await db.blobs.get(item.id);
     if (!blob) throw new Error("original PDF not stored; re-import the file");
-    const ocr = await createOcr();
+    const { ocrEngine, token } = loadSettings();
+    // Local vision model if chosen; any failure falls back to the bundled Tesseract per page.
+    const ocr = ocrEngine === "local-vision" ? createRemoteOcr("/api", { token: token || undefined, fallback: () => createOcr() }) : await createOcr();
     try {
       return await reprocessFailedParts(
         db,

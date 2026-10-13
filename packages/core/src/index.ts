@@ -18,3 +18,4 @@ export * from "./resume";
 export * from "./kindle";
 export * from "./player";
 export * from "./refine";
+export * from "./remote";
