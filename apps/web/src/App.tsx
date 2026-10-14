@@ -154,6 +154,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
   const [pos, setPos] = useState<{ i: number; n: number } | null>(null);
   const [err, setErr] = useState("");
   const [prog, setProg] = useState("");
+  const [engine, setEngine] = useState("");
   const [sugg, setSugg] = useState<Suggestions>();
   const player = useRef<Player | undefined>(undefined);
 
@@ -192,6 +193,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
     };
     const local = localSuggestions(ctx);
     setSugg(local);
+    setEngine((await getServerConfig())?.llm === "ollama" ? "your local model (Ollama)" : "Claude");
     // Claude refinement is optional: if the API has no key or is unreachable, the local result stays.
     refineSuggestions("/api", ctx, local, fetch, loadSettings().token || undefined).then(setSugg).catch(() => {});
   };
@@ -246,7 +248,7 @@ function Reader({ id, onBack }: { id: string; onBack: () => void }) {
       {sugg && (
         <section style={{ background: "#f4f4f4", padding: ".75rem", borderRadius: 6 }}>
           <strong>Suggested tags</strong>{" "}
-          {sugg.tags.map((t) => <button key={t.tag} onClick={() => void applyTag(t.tag)}>{t.existing ? "" : "+ "}{t.tag}</button>)}{sugg.refined && <small> refined by Claude{sugg.summary ? `: ${sugg.summary}` : ""}</small>}
+          {sugg.tags.map((t) => <button key={t.tag} onClick={() => void applyTag(t.tag)}>{t.existing ? "" : "+ "}{t.tag}</button>)}{sugg.refined && <small> refined by {engine || "the AI model"}{sugg.summary ? `: ${sugg.summary}` : ""}</small>}
           {sugg.collection && <p>Suggested collection: <button onClick={async () => { await db.items.update(id, { collection: sugg.collection }); await load(); }}>{sugg.collection}</button></p>}
           {sugg.toc && <details open><summary>Proposed index</summary><pre>{sugg.toc}</pre></details>}
         </section>

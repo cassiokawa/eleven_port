@@ -28,6 +28,14 @@ describe("pdf", () => {
     expect(blocks[1]!.text).toBe("body line one body line two");
   });
 
+  it("does not detach the caller's buffer (it is stored for later OCR retries)", async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage().drawText("x", { x: 50, y: 700, size: 12, font: await pdf.embedFont(StandardFonts.Helvetica) });
+    const bytes = await pdf.save();
+    await extractPdf(bytes);
+    expect(bytes.byteLength).toBeGreaterThan(0);
+  });
+
   it("reads a real PDF and flags empty pages for OCR", async () => {
     const pdf = await PDFDocument.create();
     const font = await pdf.embedFont(StandardFonts.Helvetica);

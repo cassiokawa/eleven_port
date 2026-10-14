@@ -69,10 +69,27 @@ export function pageItemsToBlocks(items: TextItem[], bodySize?: number): { block
   return { blocks, lines };
 }
 
+let workerUrl: string | undefined;
+
+/**
+ * Register the URL of pdf.js's worker script. Browsers need this (bundlers expose it via `?url` imports);
+ * Node runs without a worker URL, so tests and scripts need not call it.
+ */
+export function configurePdfWorker(url: string): void {
+  workerUrl = url;
+}
+
+async function loadPdfjs() {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  if (workerUrl) pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  return pdfjs;
+}
+
 /** Extract blocks per page from PDF bytes using pdf.js (text layer). */
 export async function extractPdf(data: Uint8Array): Promise<PdfPageResult[]> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const task = pdfjs.getDocument({ data, useSystemFonts: true });
+  const pdfjs = await loadPdfjs();
+  // pdf.js transfers the buffer to its worker, which detaches the caller's copy; pass a copy so the bytes stay usable (e.g. to store them).
+  const task = pdfjs.getDocument({ data: data.slice(), useSystemFonts: true });
   const doc = await task.promise;
 
   const pages: { items: TextItem[] }[] = [];
@@ -97,7 +114,7 @@ export type PageRenderer = (data: Uint8Array, page: number) => Promise<HTMLCanva
 
 /** Render one PDF page to a canvas (browser only). */
 export const renderPdfPage: PageRenderer = async (data, pageNo) => {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({ data: data.slice(), useSystemFonts: true });
   try {
     const doc = await task.promise;

@@ -58,27 +58,35 @@ export async function ingestUrl(url: string): Promise<Item> {
 export async function ingestPdf(name: string, data: Uint8Array, onProgress?: (d: number, t: number) => void): Promise<Item> {
   const pages = await extractPdf(data);
   const item = await addItem(db, { kind: "pdf", title: name.replace(/\.pdf$/i, ""), source: `file:${name}` });
-  // Keep the original bytes so scanned/failed pages can be OCR'd or retried later, even after a reload.
-  await db.blobs.put({ id: item.id, data, type: "application/pdf" });
-  const job = await createJob(db, item.id, pages.length);
-  await runJob(
-    db,
-    job.id,
-    async (unit) => {
-      const page = pages[unit.index]!;
-      // Scanned pages need rendering to a canvas for OCR; until then they are recorded as failed gaps.
-      if (page.needsOcr) throw new Error("no text layer (scanned page)");
-      await savePart(db, item.id, unit.index, `Page ${page.page}`, page.blocks);
-      return "ok";
-    },
-    { maxAttempts: 1, onProgress },
-  );
-  // Failed pages still get a part row so the gap is visible and retryable.
-  for (const [i, p] of pages.entries()) {
-    if (p.needsOcr) await savePart(db, item.id, i, `Page ${p.page}`, [], "failed");
+  try {
+    // Keep the original bytes so scanned/failed pages can be OCR'd or retried later, even after a reload.
+    await db.blobs.put({ id: item.id, data, type: "application/pdf" });
+    const job = await createJob(db, item.id, pages.length);
+    await runJob(
+      db,
+      job.id,
+      async (unit) => {
+        const page = pages[unit.index]!;
+        // Scanned pages need rendering to a canvas for OCR; until then they are recorded as failed gaps.
+        if (page.needsOcr) throw new Error("no text layer (scanned page)");
+        await savePart(db, item.id, unit.index, `Page ${page.page}`, page.blocks);
+        return "ok";
+      },
+      { maxAttempts: 1, onProgress },
+    );
+    // Failed pages still get a part row so the gap is visible and retryable.
+    for (const [i, p] of pages.entries()) {
+      if (p.needsOcr) await savePart(db, item.id, i, `Page ${p.page}`, [], "failed");
+    }
+    await refreshStatus(db, item.id, pages.length);
+    return item;
+  } catch (e) {
+    // Do not leave an empty half-imported item behind.
+    await db.parts.where("itemId").equals(item.id).delete();
+    await db.blobs.delete(item.id);
+    await db.items.delete(item.id);
+    throw e;
   }
-  await refreshStatus(db, item.id, pages.length);
-  return item;
 }
 
 /** Re-run failed parts: OCR for PDF pages, re-fetch for URL articles. */

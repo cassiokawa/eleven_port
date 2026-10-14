@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH ?? "playwright");
+const { PDFDocument, StandardFonts } = require("pdf-lib");
 
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
-const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm" };
+const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".wasm": "application/wasm" };
 const server = createServer((req, res) => {
   const p = join(dist, req.url === "/" ? "index.html" : req.url.split("?")[0]);
   if (!existsSync(p)) return res.writeHead(404).end();
@@ -99,7 +100,33 @@ try {
     await ctx.close();
   }
 
-  // 4. Library state survives a reload (IndexedDB), including a partial narration position.
+  // 4. PDF import in a real browser: text page becomes a part, a page without a text layer becomes a failed part, no errors.
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(base);
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const p1 = pdf.addPage();
+    p1.drawText("Lighthouse Report", { x: 50, y: 700, size: 28, font });
+    for (let i = 0; i < 4; i++) p1.drawText(`The keeper climbed the stairs, line ${i}.`, { x: 50, y: 650 - i * 14, size: 11, font });
+    pdf.addPage();
+    await page.setInputFiles("input[type=file]", { name: "report.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+    const listed = await page.getByRole("button", { name: "report", exact: true }).waitFor({ timeout: 20000 }).then(() => true, () => false);
+    check("pdf import adds an item", listed);
+    await page.waitForTimeout(1000);
+    check("pdf import shows no error", (await page.getByRole("alert").count()) === 0, JSON.stringify(await page.getByRole("alert").allTextContents()));
+    await page.getByRole("button", { name: "report", exact: true }).click();
+    const text = await page.getByText("Lighthouse Report").first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+    check("pdf text page was extracted", text);
+    check("blank page is a failed part", (await page.getByText("(failed)").count()) === 1);
+    check("no page errors (pdf)", errors.length === 0, JSON.stringify(errors));
+    await ctx.close();
+  }
+
+  // 5. Library state survives a reload (IndexedDB), including a partial narration position.
   {
     const ctx = await browser.newContext();
     const { page } = await open(ctx, (route) => route.fulfill({ status: 200, contentType: "audio/wav", body: wav() }));
