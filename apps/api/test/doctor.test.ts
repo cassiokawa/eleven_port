@@ -3,7 +3,7 @@ import { failed, runDoctor } from "../src/doctor.ts";
 
 const j = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
 
-function fake(opts: { models?: string[]; caps?: string[]; voices?: string[]; audioBytes?: number; ollamaDown?: boolean; ttsDown?: boolean }) {
+function fake(opts: { models?: string[]; caps?: string[]; voices?: unknown[]; audioBytes?: number; ollamaDown?: boolean; ttsDown?: boolean }) {
   return (async (url: string | URL, init?: RequestInit) => {
     const u = String(url);
     if (u.startsWith("http://ollama")) {
@@ -15,7 +15,10 @@ function fake(opts: { models?: string[]; caps?: string[]; voices?: string[]; aud
       if (opts.ttsDown) throw new TypeError("fetch failed");
       if (u.endsWith("/v1/audio/voices")) return opts.voices ? j({ voices: opts.voices }) : new Response("", { status: 404 });
       if (u.endsWith("/v1/audio/speech")) {
-        JSON.parse(String(init?.body));
+        const sent = JSON.parse(String(init?.body));
+        // Like a real server, reject a voice it does not have.
+        const listed = (opts.voices ?? []).map((v) => (typeof v === "string" ? v : (v as { name: string }).name));
+        if (opts.voices && !listed.includes(sent.voice)) return new Response("unknown voice", { status: 400 });
         return new Response(new Uint8Array(opts.audioBytes ?? 5000), { headers: { "content-type": "audio/mpeg" } });
       }
     }
@@ -53,9 +56,20 @@ describe("doctor", () => {
     expect(failed(cs)).toBe(true);
   });
 
-  it("rejects an unknown voice and tiny audio; tolerates a server without a voices list", async () => {
+  it("accepts voices listed as objects (Kokoro-FastAPI) without printing [object Object]", async () => {
+    const cs = await runDoctor(env, fake({ models: ["gemma4:12b"], caps: ["vision"], voices: [{ name: "af_bella" }, { name: "af_sky" }] }));
+    expect(by(cs, "tts voice")).toMatchObject({ level: "pass" });
+    expect(failed(cs)).toBe(false);
+    const other = await runDoctor({ ...env, LOCAL_TTS_VOICE: "zz_nope" }, fake({ models: ["gemma4:12b"], caps: ["vision"], voices: [{ name: "af_sky" }] }));
+    expect(by(other, "tts voice").detail).not.toContain("[object Object]");
+    expect(by(other, "tts voice").detail).toContain("af_sky");
+  });
+
+  it("fails on synthesis for a voice the server rejects, and on tiny audio; tolerates no voices list", async () => {
     const badVoice = await runDoctor(env, fake({ models: ["gemma4:12b"], caps: ["vision"], voices: ["af_sky"] }));
-    expect(by(badVoice, "tts voice").level).toBe("fail");
+    expect(by(badVoice, "tts voice").level).toBe("warn");
+    expect(by(badVoice, "local tts synthesis")).toMatchObject({ level: "fail" });
+    expect(failed(badVoice)).toBe(true);
     const tiny = await runDoctor(env, fake({ models: ["gemma4:12b"], caps: ["vision"], audioBytes: 10 }));
     expect(by(tiny, "local tts synthesis").level).toBe("fail");
     const noList = await runDoctor(env, fake({ models: ["gemma4:12b"], caps: ["vision"] }));

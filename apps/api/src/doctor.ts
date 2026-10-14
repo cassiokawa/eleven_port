@@ -59,21 +59,35 @@ async function ollamaChecks(f: Fetch, cfg: ProviderConfig): Promise<Check[]> {
   return out;
 }
 
+function voiceName(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    for (const k of ["name", "id", "voice_id", "voice"]) if (typeof o[k] === "string") return o[k] as string;
+  }
+  return undefined;
+}
+
+const preview = (names: string[], n: number) => names.slice(0, n).join(", ") + (names.length > n ? ", ..." : "");
+
 async function ttsChecks(f: Fetch, cfg: ProviderConfig): Promise<Check[]> {
   if (cfg.tts !== "local") return [check("local tts", "skip", "TTS_PROVIDER is not local")];
   if (!cfg.localTtsUrl) return [check("local tts", "fail", "LOCAL_TTS_URL is not set (Kokoro-FastAPI listens on http://localhost:8880)")];
   const out: Check[] = [];
 
-  // The voices listing is a Kokoro-FastAPI extension, not part of the OpenAI API, so absence is only a warning.
+  // The voices listing is a Kokoro-FastAPI extension, not part of the OpenAI API, and its entries may be names
+  // or objects, so this is informational only. The synthesis check below is what proves the voice works.
   try {
-    const r = await json<{ voices?: string[] }>(f, `${cfg.localTtsUrl}/v1/audio/voices`);
-    const voices = Array.isArray(r.body?.voices) ? r.body.voices : undefined;
-    if (r.ok && voices) {
-      if (!cfg.localTtsVoice) out.push(check("tts voice", "warn", `LOCAL_TTS_VOICE not set; the web app's voice field will be used. Available: ${voices.slice(0, 8).join(", ")}${voices.length > 8 ? ", ..." : ""}`));
-      else if (!voices.includes(cfg.localTtsVoice)) out.push(check("tts voice", "fail", `voice "${cfg.localTtsVoice}" not offered. Available: ${voices.slice(0, 12).join(", ")}`));
-      else out.push(check("tts voice", "pass", `${cfg.localTtsVoice} available`));
+    const r = await json<{ voices?: unknown[] }>(f, `${cfg.localTtsUrl}/v1/audio/voices`);
+    const names = r.ok && Array.isArray(r.body?.voices) ? r.body.voices.map(voiceName).filter((n): n is string => !!n) : [];
+    if (!names.length) {
+      out.push(check("tts voice", "warn", "server did not list voices in a known format; relying on the synthesis check"));
+    } else if (!cfg.localTtsVoice) {
+      out.push(check("tts voice", "warn", `LOCAL_TTS_VOICE not set; the web app's voice field will be used. Available: ${preview(names, 8)}`));
+    } else if (names.includes(cfg.localTtsVoice)) {
+      out.push(check("tts voice", "pass", `${cfg.localTtsVoice} is listed`));
     } else {
-      out.push(check("tts voice", "warn", "server did not list voices; cannot verify LOCAL_TTS_VOICE"));
+      out.push(check("tts voice", "warn", `"${cfg.localTtsVoice}" is not in the server's list. Available: ${preview(names, 12)}`));
     }
   } catch {
     /* reachability is judged by the synthesis call below */
