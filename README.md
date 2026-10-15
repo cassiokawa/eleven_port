@@ -48,6 +48,7 @@ Notes: local TTS ignores ElevenLabs-only options (voice stability/similarity and
 - Every capture or import is a job whose units (pages, chunks) are saved as they finish. A crash, closed tab or dropout loses at most the unit in flight; reopening resumes where it stopped.
 - One failed page never fails the book: it becomes a visible gap, and "Retry failed parts" re-runs only those.
 - Network calls retry with backoff and jitter and wait while offline. Narration audio is cached on the device.
+- **Every page turn is verified.** The capture engine waits for the screen to stop moving, compares a thumbnail of it with the previous page (no OCR needed when nothing changed), and only accepts the turn when the OCR text is a different page. A slow render gets progressively longer waits before the turn is declared failed, because turning again would skip a page. A failed turn falls back to the next method (Right Arrow, then a click on the right edge, then Page Down), two rounds in all. If nothing works it stops as "stalled" instead of claiming the book is done; it reports "done" only when the last page looks like an end-of-book screen. Pages that needed a retry are counted in the result.
 - Parts can be edited, re-processed, exported and narrated independently; the full library exports to a `.zip` and imports back.
 
 ## Tests
@@ -60,7 +61,8 @@ npm run e2e -w @eleven-port/extension   # Chromium with the extension loaded: pa
 
 ## Known limits
 
-- Kindle capture is verified against a mock paged reader only. The live Kindle Cloud Reader page-turn (synthetic ArrowRight key) and layout are untested; if the reader ignores synthetic keys, the loop stops after two unchanged pages and reports the position.
+- Kindle capture is verified against mock paged readers only (including ones that ignore the keyboard or lock up). The live Kindle Cloud Reader layout and its response to synthetic key and click events are untested. Turn verification cannot detect a reader that advances two pages on one turn; if exported text jumps, lower the page-turn speed or report it.
+- Chrome allows about two screenshots per second, so capturing a page takes at least a couple of seconds.
 - The extension library and the web library are separate stores. Move items between them with the `.zip` export/import.
 - Only English OCR data is bundled.
 - The extension's side panel must stay open while a book is being captured.

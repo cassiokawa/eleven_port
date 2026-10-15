@@ -63,6 +63,8 @@ export interface Unit {
   hash?: string;
   payload?: string;
   error?: string;
+  /** How the reader got to this page: which turn method worked and how many tries it took. */
+  meta?: { method: number; attempts: number };
 }
 
 /** Original source bytes (e.g. the PDF) kept so failed parts can be reprocessed later. */

@@ -28,7 +28,7 @@ const api = createServer((req, res) => {
       const n = ++ocrCalls;
       if (!JSON.parse(body).image?.startsWith("data:image/png;base64,")) return res.writeHead(400).end("{}");
       if (n === 2) return res.writeHead(502).end("{}");
-      return res.end(JSON.stringify({ text: n === 1 ? "STUB PAGE ONE\n\nread by the local vision model." : "STUB PAGE THREE\n\nalso read by the local vision model." }));
+      return res.end(JSON.stringify({ text: n === 1 ? "STUB PAGE ONE\n\nread by the local vision model." : "STUB PAGE THREE\n\nalso read by the local vision model.\n\nThe End" }));
     }
     res.writeHead(404).end("{}");
   });
@@ -48,7 +48,8 @@ try {
   let [sw] = ctx.serviceWorkers();
   sw ??= await ctx.waitForEvent("serviceworker", { timeout: 15000 });
   const extId = new URL(sw.url()).host;
-  const tabId = async (page) => sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url?.startsWith(u))?.id, page.url());
+  // Match the full URL: tabs for different runs must never be confused with each other.
+  const tabId = async (page) => sw.evaluate(async (u) => (await chrome.tabs.query({})).find((t) => t.url === u)?.id, page.url());
 
   // 1. DOM capture of a web article.
   const art = await ctx.newPage();
@@ -61,7 +62,7 @@ try {
 
   // 2. Kindle-style capture: screenshot + OCR + page turn, with pause/resume.
   const rd = await ctx.newPage();
-  await rd.goto(base + "/reader");
+  await rd.goto(base + "/reader?run=2");
   const panel2 = await ctx.newPage();
   await panel2.goto(`chrome-extension://${extId}/sidepanel.html?targetTab=${await tabId(rd)}`);
   await panel2.getByRole("button", { name: "Capture book (Kindle)" }).click();
@@ -88,7 +89,7 @@ try {
 
   // 3. Local vision OCR via the API, with per-page fallback to the bundled engine.
   const rd2 = await ctx.newPage();
-  await rd2.goto(base + "/reader");
+  await rd2.goto(base + "/reader?run=3");
   const panel3 = await ctx.newPage();
   await panel3.goto(`chrome-extension://${extId}/sidepanel.html?targetTab=${await tabId(rd2)}`);
   await panel3.evaluate((a) => chrome.storage.local.set({ api: a, ocrEngine: "local-vision" }), apiBase);
@@ -105,6 +106,37 @@ try {
   const vision = payloads.filter((t) => /STUB PAGE/.test(t));
   check("local vision pages used the API", vision.length === 2, `(${vision.length} stub pages, ${ocrCalls} calls)`);
   check("failed vision page fell back to Tesseract", payloads.some((t) => /stars|harbour/i.test(t) && !/STUB/.test(t)));
+
+  // 4. A reader that ignores the keyboard: the engine notices the turn failed and falls back to a click.
+  const rd3 = await ctx.newPage();
+  await rd3.goto(base + "/reader?run=4&quirk=clickonly");
+  const panel4 = await ctx.newPage();
+  await panel4.goto(`chrome-extension://${extId}/sidepanel.html?targetTab=${await tabId(rd3)}`);
+  // Extension storage persists across tests: go back to the bundled OCR engine.
+  await panel4.evaluate(() => chrome.storage.local.set({ ocrEngine: "tesseract" }));
+  await panel4.reload();
+  await panel4.getByRole("button", { name: "Capture book (Kindle)" }).click();
+  await panel4.getByText(/^Done: \d+ pages/).waitFor({ timeout: 300000 });
+  const done4 = await panel4.getByText(/^Done: \d+ pages/).textContent();
+  check("key-ignoring reader: all pages captured via fallback", /Done: 3 pages/.test(done4 ?? ""), `(${done4})`);
+  check("fallback turns are reported", /needed a retried page turn/.test(done4 ?? ""), `(${done4})`);
+
+  // 5. A reader that locks up mid-book: stalled, not "done"; progress is kept and can be marked complete.
+  const rd4 = await ctx.newPage();
+  await rd4.goto(base + "/reader?run=5&quirk=lockup");
+  const panel5 = await ctx.newPage();
+  await panel5.goto(`chrome-extension://${extId}/sidepanel.html?targetTab=${await tabId(rd4)}`);
+  // Extension storage persists across tests: go back to the bundled OCR engine.
+  await panel5.evaluate(() => chrome.storage.local.set({ ocrEngine: "tesseract" }));
+  await panel5.reload();
+  await panel5.getByRole("button", { name: "Capture book (Kindle)" }).click();
+  await panel5.getByText(/^Stopped after \d+ pages/).waitFor({ timeout: 300000 });
+  const stalledText = await panel5.getByText(/^Stopped after \d+ pages/).textContent();
+  check("locked-up reader reports stalled with the page count", /Stopped after 2 pages/.test(stalledText ?? ""), `(${stalledText})`);
+  check("stalled does not claim done", (await panel5.getByText(/^Done:/).count()) === 0);
+  await panel5.getByRole("button", { name: /mark complete/ }).click();
+  await panel5.getByText("Marked complete.").waitFor({ timeout: 10000 });
+  check("mark complete clears the stalled prompt", (await panel5.getByRole("button", { name: /mark complete/ }).count()) === 0);
 } catch (e) {
   console.log("FAIL exception", e);
   failed++;

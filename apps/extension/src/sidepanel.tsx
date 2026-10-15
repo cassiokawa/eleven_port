@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  LibraryDB, addItem, captureBook, cleanOcrText, exportArchive, fetchServerConfig, type ServerConfig, itemToMarkdown, listItems, narrate, parseMarkdown,
+  LibraryDB, addItem, assembleCaptured, captureBook, cleanOcrText, exportArchive, fetchServerConfig, type ServerConfig, itemToMarkdown, listItems, narrate, parseMarkdown,
   refreshStatus, savePart, savePosition, type Item, type Player,
 } from "@eleven-port/core";
 import { getOcr, type OcrEngine } from "./ocr";
-import { activeTab, cropDataUrl, extractFromTab, screenshot, turnPage } from "./tab";
+import { TURN_METHODS, activeTab, cropDataUrl, extractFromTab, fingerprintDataUrl, screenshot, turnPage } from "./tab";
 
 const db = new LibraryDB();
 const DEFAULT_API = "http://localhost:8787";
@@ -34,6 +34,7 @@ function Panel() {
   const [server, setServer] = useState<ServerConfig | undefined>();
   const [bookId, setBookId] = useState<string>();
   const [capturing, setCapturing] = useState(false);
+  const [stalled, setStalled] = useState<string | undefined>();
   const abort = useRef<AbortController | undefined>(undefined);
   const player = useRef<Player | undefined>(undefined);
 
@@ -82,6 +83,7 @@ function Panel() {
   const captureBookRun = async (resumeId?: string) => {
     setError("");
     setCapturing(true);
+    setStalled(undefined);
     abort.current = new AbortController();
     try {
       const tab = await activeTab();
@@ -96,15 +98,20 @@ function Panel() {
         {
           capture: async () => cropDataUrl(await screenshot(tab.windowId), crop),
           ocr: async (img) => ocr.recognize(img),
-          turn: () => turnPage(tab.id!),
+          turn: (method) => turnPage(tab.id!, method),
+          fingerprint: fingerprintDataUrl,
           sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
           signal: abort.current.signal,
         },
-        { settleMs: 1000, onProgress: (n) => setStatus(`Captured ${n} pages`) },
+        { settleMs: 1000, turnMethods: TURN_METHODS, onProgress: (n) => setStatus(`Captured ${n} pages`) },
       );
+      const retries = res.retried ? `, ${res.retried} page${res.retried === 1 ? "" : "s"} needed a retried page turn` : "";
       if (res.state === "needs-reposition") setError("The reader is not on the last saved page. Navigate to it, then press Resume.");
       else if (res.state === "paused") setStatus(`Paused after ${res.pages} pages. Progress is saved.`);
-      else setStatus(`Done: ${res.pages} pages${res.gaps.length ? `, unreadable: ${res.gaps.join(", ")}` : ""}`);
+      else if (res.state === "stalled") {
+        setStalled(id);
+        setError(`Stopped after ${res.pages} pages: the page did not change after trying every page-turn method. This is either the end of the book or the reader ignored the turn. Progress is saved as a partial book.`);
+      } else setStatus(`Done: ${res.pages} pages${retries}${res.gaps.length ? `, unreadable: ${res.gaps.join(", ")}` : ""}`);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -140,6 +147,13 @@ function Panel() {
         {!capturing && bookId && <button onClick={() => void captureBookRun(bookId)}>Resume book</button>}
         {capturing && <button onClick={() => abort.current?.abort()}>Pause / stop</button>}
       </div>
+      {stalled && (
+        <p>
+          <button onClick={async () => { await assembleCaptured(db, stalled, `${stalled}:open`, true); setStalled(undefined); setError(""); setStatus("Marked complete."); await refresh(); }}>
+            This was the end of the book: mark complete
+          </button>
+        </p>
+      )}
       {status && <p>{status}</p>}
       {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
       <ul style={{ paddingLeft: 16 }}>

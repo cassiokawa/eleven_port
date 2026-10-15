@@ -9,12 +9,17 @@ export const article = `<!doctype html><html><head><title>Harbour Notes</title><
 export const PAGES = [
   "CHAPTER ONE\n\nThe lighthouse keeper climbed the stairs each evening\nand lit the great lamp for passing ships.",
   "The sea was calm that night and the stars\nwere bright above the quiet harbour town.",
-  "CHAPTER TWO\n\nMorning arrived with fog drifting slowly\nacross the water and over the empty quay.",
+  "CHAPTER TWO\n\nMorning arrived with fog drifting slowly\nacross the water and over the empty quay.\n\nThe End",
 ];
 export const reader = `<!doctype html><html><head><title>Mock Reader</title>
 <style>body{margin:0;background:#fff}#p{font:34px/1.5 Georgia,serif;white-space:pre-wrap;padding:90px 140px;width:900px}</style></head>
 <body><div id="p"></div><script>
 const pages=${JSON.stringify(PAGES)};let i=0;const el=document.getElementById('p');
 const show=()=>{el.textContent=pages[i]};show();
-addEventListener('keydown',e=>{if(e.key==='ArrowRight'&&i<pages.length-1){i++;show()}});
+// ?quirk=clickonly: keys are ignored, only a click on the right edge turns the page.
+// ?quirk=lockup: the reader stops responding after the second page, like a stuck reader.
+const quirk=new URLSearchParams(location.search).get('quirk');
+const next=()=>{if(i<pages.length-1&&!(quirk==='lockup'&&i>=1)){i++;show()}};
+addEventListener('keydown',e=>{if(quirk!=='clickonly'&&e.key==='ArrowRight')next()});
+addEventListener('click',e=>{if(quirk==='clickonly'&&e.clientX>innerWidth*0.8)next()});
 </script></body></html>`;
