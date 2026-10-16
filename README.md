@@ -21,7 +21,7 @@ npm run dev -w @eleven-port/web      # proxies /api to the server
 npm run build -w @eleven-port/extension   # then load apps/extension/dist as an unpacked extension
 ```
 
-API environment: see `.env.example`. `API_TOKEN` (optional bearer auth), `ALLOWED_ORIGINS` (comma-separated browser origins; empty allows only same-origin/proxy use), `PORT`.
+API environment: see `.env.example`. `API_TOKEN` (optional bearer auth), `ALLOWED_ORIGINS` (comma-separated browser origins; empty uses the defaults: localhost on any port, 127.0.0.1 on any port, and Chrome extensions; web pages on other origins are always refused unless listed), `PORT`.
 
 ## Cloud or local models
 

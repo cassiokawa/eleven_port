@@ -43,3 +43,30 @@ describe("guard", () => {
     expect((await post({ text: "x", voice_id: "abcdefghij12", voice_settings: { stability: 0.5, similarity_boost: 0.8 } })).status).toBe(200);
   });
 });
+
+
+describe("default origins (no ALLOWED_ORIGINS set)", () => {
+  const get = (origin?: string) => createApp().request("/config", { headers: origin ? { origin } : {} });
+
+  it("accepts the dev web app, the extension and non-browser callers", async () => {
+    expect((await get("http://localhost:5173")).status).toBe(200);
+    expect((await get("http://127.0.0.1:8080")).status).toBe(200);
+    expect((await get("chrome-extension://abcdefghijklmnopabcdefghijklmnop")).status).toBe(200);
+    expect((await get()).status).toBe(200);
+    const r = await get("chrome-extension://abcdefghijklmnopabcdefghijklmnop");
+    expect(r.headers.get("access-control-allow-origin")).toBe("chrome-extension://abcdefghijklmnopabcdefghijklmnop");
+  });
+
+  it("still refuses web pages on other origins and look-alike hosts", async () => {
+    expect((await get("https://evil.example")).status).toBe(403);
+    expect((await get("http://localhost.evil.example")).status).toBe(403);
+    expect((await get("http://localhost:80.evil.example")).status).toBe(403);
+    expect((await get("https://localhost:5173")).status).toBe(403);
+  });
+
+  it("answers the preflight a browser sends before a JSON POST from the extension", async () => {
+    const res = await createApp().request("/tts", { method: "OPTIONS", headers: { origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop", "access-control-request-method": "POST" } });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-headers")).toContain("content-type");
+  });
+});

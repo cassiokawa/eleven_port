@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Hono } from "hono";
-import { guard, type GuardOptions } from "./guard.ts";
+import { DEFAULT_ORIGINS, guard, type GuardOptions } from "./guard.ts";
 import { readConfig, type ProviderConfig } from "./providers/config.ts";
 import { LocalModelError, ocrOllama, suggestOllama } from "./providers/ollama.ts";
 import { ttsElevenLabs, ttsLocal, type TtsBody } from "./providers/tts.ts";
@@ -39,7 +39,7 @@ export function createApp(deps: Deps = {}) {
     "*",
     guard({
       token: process.env.API_TOKEN,
-      allowedOrigins: process.env.ALLOWED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean),
+      allowedOrigins: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean) : DEFAULT_ORIGINS,
       ...deps.guard,
     }),
   );

@@ -11,6 +11,23 @@ export interface GuardOptions {
   now?: () => number;
 }
 
+/**
+ * Origins a local install should accept without configuration: the dev web app on any localhost port and
+ * any installed Chrome extension. Websites on other origins are refused, which is what stops a page you
+ * happen to visit from calling your API.
+ */
+export const DEFAULT_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*", "chrome-extension://*"];
+
+/** Match an Origin header against an allowlist entry: exact, "*" for anything, ":*" for any port, "*" elsewhere for any text. */
+export function originMatches(pattern: string, origin: string): boolean {
+  if (pattern === "*") return true;
+  const re = pattern
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .reduce((acc, part, i, arr) => (i === 0 ? part : acc + (arr[i - 1]!.endsWith(":") ? "\\d+" : ".*") + part), "");
+  return new RegExp(`^${re}$`).test(origin);
+}
+
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let d = 0;
@@ -28,7 +45,7 @@ export function guard(o: GuardOptions = {}): MiddlewareHandler {
 
   return async (c, next) => {
     const origin = c.req.header("origin");
-    const originOk = !origin || origins.includes("*") || origins.includes(origin);
+    const originOk = !origin || origins.some((p) => originMatches(p, origin));
     if (origin && originOk) {
       c.header("access-control-allow-origin", origin);
       c.header("vary", "origin");
