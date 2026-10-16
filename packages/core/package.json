@@ -1,0 +1,27 @@
+{
+  "name": "@eleven-port/core",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "dexie": "^4.0.0",
+    "fflate": "^0.8.3",
+    "minisearch": "^7.2.0",
+    "pdfjs-dist": "^6.4.299",
+    "tesseract.js": "^7.0.0",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/turndown": "^5.0.6",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^29.1.1",
+    "pdf-lib": "^1.17.1"
+  }
+}

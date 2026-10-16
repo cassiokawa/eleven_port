@@ -1,0 +1,29 @@
+# Privacy and data handling
+
+eleven_port keeps your library on your own device. This page lists exactly what leaves it.
+
+## Stays local
+- The library (items, parts, original PDFs, cached audio, narration positions) lives in the browser's IndexedDB for the web app and, separately, for the extension. Nothing is uploaded unless you configure one of the services below.
+- OCR runs in the browser. The extension bundles the OCR engine and language data, so screenshots of your screen or of a Kindle book are never sent to a third party for recognition.
+- Library export is a `.zip` you save yourself. Treat it as you would the books and articles inside it.
+
+## Leaves the device, only when you use the feature
+| Feature | What is sent | To whom |
+|---|---|---|
+| Narration | The text of the chunk being read (plus ~200 characters of neighbouring text for natural prosody when using ElevenLabs) | Your `apps/api` server, which forwards it to ElevenLabs, or to your local TTS server |
+| URL import | The URL you enter | Your `apps/api` server, which fetches the page |
+| Tag/collection refinement | Title, headings, your existing tag and collection names, and the first ~6,000 characters of the document | Your `apps/api` server, which forwards it to Anthropic, or to your local Ollama. If neither is configured, nothing is sent and the local heuristic result is used |
+
+Audio is cached locally by chunk, so replaying sends nothing.
+
+### Running fully local
+With `LLM_PROVIDER=ollama`, `TTS_PROVIDER=local` and a local TTS server, no document text is sent to ElevenLabs or Anthropic: the API forwards it only to the `OLLAMA_URL` and `LOCAL_TTS_URL` you configured (by default your own machine). Choosing "Local vision model" for OCR sends page images to your API server and on to `OLLAMA_VISION_MODEL`, never to a cloud service. If you point those URLs at another machine, text and images go there, so keep them on `localhost` or a network you trust. The API's `GET /config` shows which engines are active.
+
+## Keys
+API keys (`ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY`) exist only in the server's environment and are never sent to the browser or extension. If you set `API_TOKEN`, clients must send it as a bearer token; the web app stores that token in `localStorage` on your device.
+
+## Kindle and other protected content
+The Kindle capture takes screenshots of what your own signed-in reader displays and reads them with OCR, for your personal use. You are responsible for complying with the terms of the service and of the content owner. Do not redistribute captured books or narrations.
+
+## Third-party terms
+Text you narrate or refine is processed under ElevenLabs' and Anthropic's own terms and retention policies. Review them before sending sensitive documents.

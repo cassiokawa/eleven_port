@@ -1,0 +1,16 @@
+{
+  "name": "@eleven-port/api",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --experimental-strip-types src/server.ts",
+    "test": "vitest run",
+    "doctor": "node --env-file-if-exists=../../.env --experimental-strip-types src/doctor-cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.13"
+  }
+}
