@@ -29,6 +29,17 @@ export async function extractFromTab(tabId: number): Promise<WebCapture> {
 const MIN_SHOT_GAP_MS = 600;
 let lastShot = 0;
 
+/** Chrome only allows screenshots and page scripting with `<all_urls>` or a fresh `activeTab` grant; a single-site host permission is not enough. */
+export const ALL_SITES = { origins: ["<all_urls>"] };
+
+export class AccessError extends Error {}
+
+const ACCESS_RE = /<all_urls>|activeTab|Cannot access contents of|must request permission to access/i;
+
+export const isAccessError = (e: unknown): boolean => e instanceof AccessError || ACCESS_RE.test((e as Error)?.message ?? "");
+
+export const requestAllSitesAccess = (): Promise<boolean> => chrome.permissions.request(ALL_SITES);
+
 export async function screenshot(windowId: number): Promise<string> {
   const wait = lastShot + MIN_SHOT_GAP_MS - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -36,6 +47,9 @@ export async function screenshot(windowId: number): Promise<string> {
   if (forcedTab) await chrome.tabs.update(forcedTab, { active: true });
   try {
     return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+  } catch (e) {
+    if (ACCESS_RE.test((e as Error).message)) throw new AccessError((e as Error).message);
+    throw e;
   } finally {
     lastShot = Date.now();
   }

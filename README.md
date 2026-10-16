@@ -41,6 +41,10 @@ Each capability can run in the cloud or on your machine. The API picks the engin
 4. `npm run doctor -w @eleven-port/api`. It checks Ollama, the models and their vision capability, the TTS server and voice, and synthesizes a test phrase. Fix every `FAIL` before starting the API.
 5. `npm run dev -w @eleven-port/api`, then `GET /config` should report `ollama` and `local`.
 
+### Chrome permissions for the extension
+
+Chrome only lets an extension take screenshots or script a page when it has "all sites" access or a fresh `activeTab` grant on that tab; a single-site permission such as read.amazon.com is not enough. A fresh install therefore asks once: when a capture needs access, the panel shows **Allow access to all sites** (a normal Chrome permission prompt). You can also set it yourself under `chrome://extensions` > eleven_port > Details > Site access > On all sites, or click the eleven_port toolbar icon while the tab is in front to allow that one tab until it navigates. Nothing is sent anywhere because of this permission; it only lets the extension read the tab you ask it to capture.
+
 Notes: local TTS ignores ElevenLabs-only options (voice stability/similarity and neighbouring-text context), so chunk joins can sound slightly less natural. Vision-model OCR is much slower than Tesseract, so capturing a whole book with it takes far longer; Tesseract stays the default. Small local models give weaker tags than Claude.
 
 ## Reliability model

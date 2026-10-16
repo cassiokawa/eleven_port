@@ -5,7 +5,7 @@ import {
   refreshStatus, savePart, savePosition, type Item, type Player,
 } from "@eleven-port/core";
 import { getOcr, type OcrEngine } from "./ocr";
-import { TURN_METHODS, activeTab, cropDataUrl, extractFromTab, fingerprintDataUrl, screenshot, turnPage } from "./tab";
+import { TURN_METHODS, activeTab, cropDataUrl, extractFromTab, fingerprintDataUrl, isAccessError, requestAllSitesAccess, screenshot, turnPage } from "./tab";
 
 const db = new LibraryDB();
 const DEFAULT_API = "http://localhost:8787";
@@ -35,10 +35,16 @@ function Panel() {
   const [bookId, setBookId] = useState<string>();
   const [capturing, setCapturing] = useState(false);
   const [stalled, setStalled] = useState<string | undefined>();
+  const [needAccess, setNeedAccess] = useState(false);
+  const [partCounts, setPartCounts] = useState<Record<string, number>>({});
   const abort = useRef<AbortController | undefined>(undefined);
   const player = useRef<Player | undefined>(undefined);
 
-  const refresh = useCallback(async () => setItems(await listItems(db)), []);
+  const refresh = useCallback(async () => {
+    const list = await listItems(db);
+    setItems(list);
+    setPartCounts(Object.fromEntries(await Promise.all(list.map(async (i) => [i.id, await db.parts.where("itemId").equals(i.id).count()]))));
+  }, []);
   useEffect(() => {
     void refresh();
     void store.get("api", DEFAULT_API).then(setApi);
@@ -56,7 +62,8 @@ function Panel() {
   const guard = async (label: string, fn: () => Promise<void>) => {
     setError("");
     setStatus(label);
-    try { await fn(); } catch (e) { setError((e as Error).message); }
+    setNeedAccess(false);
+    try { await fn(); } catch (e) { if (isAccessError(e)) setNeedAccess(true); else setError((e as Error).message); }
     setStatus("");
     await refresh();
   };
@@ -82,12 +89,16 @@ function Panel() {
 
   const captureBookRun = async (resumeId?: string) => {
     setError("");
+    setNeedAccess(false);
     setCapturing(true);
     setStalled(undefined);
     abort.current = new AbortController();
+    let created: string | undefined;
     try {
       const tab = await activeTab();
-      const id = resumeId ?? (await addItem(db, { kind: "book", title: tab.title?.replace(/^Amazon\.com:\s*/, "") ?? "Kindle book", source: tab.url ?? "kindle" })).id;
+      // Probe first: without access to this tab nothing can be captured, and no empty item should be left behind.
+      await screenshot(tab.windowId);
+      const id = resumeId ?? (created = (await addItem(db, { kind: "book", title: tab.title?.replace(/^Amazon\.com:\s*/, "") ?? "Kindle book", source: tab.url ?? "kindle" })).id);
       setBookId(id);
       await store.set("bookId", id);
       const ocr = await getOcr(ocrEngine, api, token || undefined);
@@ -113,7 +124,13 @@ function Panel() {
         setError(`Stopped after ${res.pages} pages: the page did not change after trying every page-turn method. This is either the end of the book or the reader ignored the turn. Progress is saved as a partial book.`);
       } else setStatus(`Done: ${res.pages} pages${retries}${res.gaps.length ? `, unreadable: ${res.gaps.join(", ")}` : ""}`);
     } catch (e) {
-      setError((e as Error).message);
+      if (isAccessError(e)) setNeedAccess(true);
+      else setError((e as Error).message);
+      // A capture that failed before saving a single page must not leave an empty book in the library.
+      if (created && (await db.units.where("jobId").equals(`${created}:open`).count()) === 0) {
+        await db.jobs.delete(`${created}:open`);
+        await db.items.delete(created);
+      }
     }
     setCapturing(false);
     await refresh();
@@ -147,6 +164,22 @@ function Panel() {
         {!capturing && bookId && <button onClick={() => void captureBookRun(bookId)}>Resume book</button>}
         {capturing && <button onClick={() => abort.current?.abort()}>Pause / stop</button>}
       </div>
+      {needAccess && (
+        <div style={{ border: "1px solid #c90", padding: 8, borderRadius: 6 }}>
+          <p>Chrome has not allowed eleven_port to see this tab yet. Approve it once and capture will work on every site.</p>
+          <button
+            onClick={async () => {
+              const ok = await requestAllSitesAccess();
+              setNeedAccess(!ok);
+              if (ok) setStatus("Access granted. Press the capture button again.");
+              else setError("Access was not granted.");
+            }}
+          >
+            Allow access to all sites
+          </button>
+          <p><small>Alternative: click the eleven_port toolbar icon while this tab is in front. That allows this tab only, until it navigates.</small></p>
+        </div>
+      )}
       {stalled && (
         <p>
           <button onClick={async () => { await assembleCaptured(db, stalled, `${stalled}:open`, true); setStalled(undefined); setError(""); setStatus("Marked complete."); await refresh(); }}>
@@ -161,7 +194,7 @@ function Panel() {
           <li key={i.id}>
             <strong>{i.title}</strong> <small>({i.kind}, {i.status})</small>
             <div>
-              <button onClick={() => void play(i)}>▶</button>
+              <button disabled={!partCounts[i.id]} title={partCounts[i.id] ? "Narrate" : "Nothing captured yet"} onClick={() => void play(i)}>▶</button>
               <button onClick={() => { player.current?.stop(); setStatus(""); }}>■</button>
               <button onClick={async () => download(`${i.title}.md`, await itemToMarkdown(db, i.id), "text/markdown")}>.md</button>
               <button onClick={async () => { await db.parts.where("itemId").equals(i.id).delete(); await db.items.delete(i.id); await refresh(); }}>✕</button>

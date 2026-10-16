@@ -7,7 +7,7 @@
     "build": "node build.mjs",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "e2e": "EP_TEST=1 node build.mjs && node e2e/run.mjs"
+    "e2e": "EP_TEST=1 node build.mjs && node e2e/run.mjs && node e2e/permissions.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.5",
